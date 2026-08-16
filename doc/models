@@ -1,10 +1,36 @@
-ChatGPT Plus
+        where do the models live?
+        
+        
+        Three different homes, one per tool.
+        
+        Command echo in $HOME/
+        
+        echo "== llmster / LM Studio (Qwen)"; du -sh $HOME/.lmstudio/models 2>/dev/null; ls $HOME/.lmstudio/models/mlx-community 2>/dev/null; echo; echo "== Hugging Face cache (Whisper, pyannote)"; du -sh $HOME/.cache/huggingface/hub 2>/dev/null; ls $HOME/.cache/huggingface/hub 2>/dev/null
+        == llmster / LM Studio (Qwen)
+         19G	$HOME/.lmstudio/models
+        Qwen3.6-35B-A3B-4bit
+        
+        == Hugging Face cache (Whisper, pyannote)
+        1.5G	$HOME/.cache/huggingface/hub
+        CACHEDIR.TAG
+        models--mlx-community--whisper-large-v3-turbo
+        models--pyannote--speaker-diarization-community-1
+        version.txt
+        
+        Two locations, split by which tool did the download:
+        
+        Qwen3.6-35B-A3B-4bit — $HOME/.lmstudio/models/mlx-community/Qwen3.6-35B-A3B-4bit/ (~19 GB) Downloaded by lms get, owned by llmster. This is what lms ls lists and lms load reads. You can move the LM Studio models directory in the app's settings if you want it elsewhere.
+        
+        Whisper large-v3-turbo and pyannote speaker-diarization-community-1 — $HOME/.cache/huggingface/hub/ (~1.5 GB) Standard Hugging Face Hub cache, populated by huggingface_hub.snapshot_download and Pipeline.from_pretrained. Location is governed by HF_HOME (defaults to $HOME/.cache/huggingface); set it before running the script to relocate.
+        
+        Neither lives inside the repo, which is correct — they're large, machine-local, and rebuildable from upstream. The .gitignore only needs to keep the .venv and transient test clips out of git; the model caches were never at risk of being committed.
 
 
 
 
 
-Worked for 48s
+
+
 I’d choose Qwen3.6-35B-A3B, specifically a 4-bit MLX quantization, for that MacBook Air.
 
 It is unusually well matched to what you described: technical conversation, explaining code/concepts, generating code, and reviewing existing code. Qwen3.6 has 35B total parameters but only ~3B active parameters per token, so you get much of the knowledge/capacity benefit of a 35B-class model without the inference cost of a dense 35B model. Qwen specifically calls out improved repository-level reasoning and coding in this release. 

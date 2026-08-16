@@ -1,0 +1,4 @@
+.venv/
+.speech_selftest.wav
+__pycache__/
+*.pyc
