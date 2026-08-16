@@ -154,17 +154,37 @@ final class MicrophoneCapture {
 
 // MARK: - system audio
 
-/// Reads a Core Audio property whose value is a single fixed size value.
+/// Describes a property of a Core Audio object in the global scope.
+func global_audio_property_address(_ selector: AudioObjectPropertySelector)
+    -> AudioObjectPropertyAddress {
+    AudioObjectPropertyAddress(mSelector: selector,
+                               mScope: kAudioObjectPropertyScopeGlobal,
+                               mElement: kAudioObjectPropertyElementMain)
+}
+
+/// Reads a Core Audio property whose value is a single fixed size trivial value; types holding
+/// managed references must be read as `Unmanaged` so that no reference count is lost.
 func read_audio_property<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector,
                             _ fallback: T) -> T {
-    var address = AudioObjectPropertyAddress(mSelector: selector,
-                                             mScope: kAudioObjectPropertyScopeGlobal,
-                                             mElement: kAudioObjectPropertyElementMain)
+    var address = global_audio_property_address(selector)
     var value = fallback
     var size = UInt32(MemoryLayout<T>.size)
-    require_no_error(AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value),
-                     "reading Core Audio property \(selector)")
+    let status = withUnsafeMutableBytes(of: &value) { bytes -> OSStatus in
+        guard let start = bytes.baseAddress else { die("Core Audio property buffer is empty") }
+        return AudioObjectGetPropertyData(object, &address, 0, nil, &size, start)
+    }
+    require_no_error(status, "reading Core Audio property \(selector)")
     return value
+}
+
+/// Reads a Core Audio property whose value is a retained string reference.
+func read_audio_string_property(_ object: AudioObjectID,
+                               _ selector: AudioObjectPropertySelector) -> String {
+    let reference: Unmanaged<CFString>? = read_audio_property(object, selector, nil)
+    guard let text = reference?.takeRetainedValue() else {
+        die("Core Audio property \(selector) returned no text")
+    }
+    return text as String
 }
 
 func default_output_device_uid() -> String {
@@ -172,14 +192,11 @@ func default_output_device_uid() -> String {
                                                     kAudioHardwarePropertyDefaultOutputDevice,
                                                     AudioDeviceID(kAudioObjectUnknown))
     guard device != kAudioObjectUnknown else { die("there is no default output device") }
-    let uid: CFString = read_audio_property(device, kAudioDevicePropertyDeviceUID, "" as CFString)
-    return uid as String
+    return read_audio_string_property(device, kAudioDevicePropertyDeviceUID)
 }
 
 func tap_stream_format(_ tap: AudioObjectID) -> AVAudioFormat {
-    var address = AudioObjectPropertyAddress(mSelector: kAudioTapPropertyFormat,
-                                             mScope: kAudioObjectPropertyScopeGlobal,
-                                             mElement: kAudioObjectPropertyElementMain)
+    var address = global_audio_property_address(kAudioTapPropertyFormat)
     var description = AudioStreamBasicDescription()
     var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
     require_no_error(AudioObjectGetPropertyData(tap, &address, 0, nil, &size, &description),
