@@ -2,3 +2,5 @@
 .speech_selftest.wav
 __pycache__/
 *.pyc
+bin/audio_capture
+var/

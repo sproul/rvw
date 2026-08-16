@@ -1,0 +1,100 @@
+PHASE 1 - MINIMUM VIABLE ASSISTANT
+==================================
+
+What it does
+------------
+Continuously captures audio, transcribes it locally into a rolling timestamped
+transcript, and on a global hotkey sends roughly the last 60 seconds of text -
+and nothing else - to the local LLM for an explanation, which is streamed to
+the terminal and recorded in the session log. No audio, transcript or answer
+ever leaves the machine.
+
+
+Running it
+----------
+  util/init_local_models.sh          once, and after every reboot of the LLM
+                                     server; it loads the model under the
+                                     identifier "meeting-assistant"
+  helper/build.sh                    once, and after editing the Swift helper
+  bin/rvw                            start the assistant in a terminal
+  bin/rvw --source system --listen   start it already capturing, system only
+
+Hotkeys (Hammerspoon, see hammerspoon/rvw_hotkeys.lua):
+  alt-cmd-R          start or stop capture
+  ctrl-alt-cmd-R     capture and analyse continuously (every 120 s)
+  alt-cmd-E          explain the last 60 seconds
+
+The same commands work from a terminal, which is also how to script them:
+  bin/rvwctl EXPLAIN 90
+  bin/rvwctl STATUS
+  bin/rvwctl QUIT
+
+Tests:
+  util/run_tests.sh
+
+
+Design decisions
+----------------
+Audio capture is a separate Swift process (bin/audio_capture) writing mono
+16 kHz float32 PCM to stdout. System audio uses a Core Audio process tap, which
+observes playback without sitting in it: no virtual audio device, no change of
+output device, headphones keep working. The microphone uses AVAudioEngine.
+
+Microphone and system audio are captured as two independent processes and two
+independent transcript streams, labelled "me" and "them". They are never mixed
+into one PCM stream, so my own words stay separable.
+
+Recognition is cut on silence rather than on fixed windows. Utterance sized
+chunks are independent, so there is no overlap to deduplicate and no half words
+at chunk boundaries. A segment whose loudest sample is quiet is discarded
+without being recognised, because Whisper invents filler phrases such as
+"Thank you." when it is handed near silence.
+
+Commands (EXPLAIN, TOGGLE_CAPTURE, ...) go through a dispatcher fed by a unix
+socket. Hammerspoon owns the hotkeys, so the assistant itself needs no
+accessibility permission, and Phase 7 can point the same client at the
+companion Mac by replacing the transport under the dispatcher.
+
+Transcript records already carry stream, start and end timestamps and text, so
+Phase 3 can persist them without changing any producer. Nothing is written to
+disk in Phase 1 except the session log.
+
+The LLM is reached over the OpenAI compatible endpoint, so the model can be
+swapped with the RVW_LLM_MODEL environment variable. Reasoning tokens are kept
+out of the printed answer.
+
+
+Measured on the M4 Air, 32 GB
+-----------------------------
+Speech recognition   9.9 s of audio recognised in 1.0 s (whisper-large-v3-turbo,
+                     MLX), so transcription keeps up comfortably.
+Explanation          129 s for one 60 second window with Qwen3.6-35B-A3B 4-bit.
+                     That is not usable live.
+
+The cause is memory, not the code: the 20.4 GB model plus a browser, an editor
+and the speech model pushed the machine into 16.8 GB of swap, and generation
+fell to about 5 tokens/s. Most of the budget went on reasoning tokens, and
+enable_thinking=false is ignored by this model in LM Studio.
+
+
+Rough edges
+-----------
+- Microphone capture needs the Microphone permission for whichever application
+  launches the helper; the helper now fails loudly instead of recording silence.
+- The system audio tap needs the audio recording permission on first use.
+- Continuous analysis is a plain timer that re-runs EXPLAIN; with the current
+  model on this machine it cannot keep up.
+- Whisper checks Hugging Face for the model revision at start-up. Set
+  HF_HUB_OFFLINE=1 to keep start-up entirely local.
+- Language is fixed to English by default (RVW_WHISPER_LANGUAGE).
+
+
+Recommended before Phase 2
+--------------------------
+1. Choose a smaller local model for the 32 GB M4 Air. This is the Phase 8
+   decision arriving early: the assistant needs a model that leaves room for
+   the browser, the conferencing application and the speech model. The 35B MoE
+   remains the right choice for software analysis on the 96 GB M3.
+2. Test against real speech and a real accent, not synthesized speech, and tune
+   silence_rms_threshold and min_segment_peak_amplitude in src/rvw/config.py.
+3. Confirm the microphone stream end to end once the permission is granted.

@@ -1,0 +1,18 @@
+#!/bin/bash
+# Start the local listening assistant in this terminal.
+
+set -o pipefail
+
+script_dir=$(cd "$(dirname "$BASH_SOURCE")" && pwd)
+repo_dir=$(cd "$script_dir/.." && pwd)
+venv_python=$repo_dir/.venv/bin/python
+
+[[ -x $venv_python ]] || { echo "FAIL missing $venv_python; run util/init_local_models.sh first" >&2; exit 1; }
+[[ -x $script_dir/audio_capture ]] || { echo "FAIL missing $script_dir/audio_capture; run helper/build.sh" >&2; exit 1; }
+
+PYTHONPATH=$repo_dir/src exec "$venv_python" -m rvw.assistant "$@"
+
+exit
+$dp/git/rvw/bin/rvw
+$dp/git/rvw/bin/rvw --listen --debug
+$dp/git/rvw/bin/rvw --source system

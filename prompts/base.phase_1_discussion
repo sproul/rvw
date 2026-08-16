@@ -1,0 +1,227 @@
+I posed this to gpt:
+
+    Implement phase 1 in $dp/git/rvw/prompts/base
+    
+    Phase 0 of my plan already done to set up an always-available LLM assistant who can help me understand technical content and translate human languages during meetings to help me be a more effective participant. Phase 0 left audio capture broadly unsettled. Help me nswer the question of How should the MVA capture system audio (mic capture is easy either way)?
+    
+    I want to be able to set up policies to track what is going on and be able to hit a hotkey and get LLM help on understanding content coming across my desktop (whether in a meeting or in arbitrary content I am looking at). B below seems incompatible with my goal, requring output device switching; I want the LLM presence to be always possible, mostly dormant but always available via hotkey. What do you think of these choices?
+    
+    A
+    Swift ScreenCaptureKit helper
+    Small Swift helper process emits 16kHz mono PCM on stdout for both --mic and --system. No virtual device to install, but needs Screen Recording permission for the terminal, and I have to write/debug Swift.
+    
+    
+    B
+    BlackHole virtual device
+    brew install blackhole-2ch, you create a Multi-Output Device in Audio MIDI Setup, then capture it with ffmpeg like any input. Less code, manual one-time setup, and you must switch output device during meetings.
+    
+    
+    C
+    Mic only for now
+    Phase 1 captures microphone only via ffmpeg avfoundation; system audio deferred to Phase 2. Fastest to a usable MVA (works for in-person and for meetings via speaker+mic).
+    
+
+gpt answer:
+
+D — Core Audio process tap
+
+Since macOS 14.2, Apple provides an API specifically for this: AudioHardwareCreateProcessTap. It captures outgoing audio from processes without changing where that audio is actually playing. Apple supports global taps, process-specific taps, mono/stereo mixdown, exclusions, and private taps.
+
+Conceptually:
+
+                    macOS audio
+                        │
+           ┌────────────┴────────────┐
+           │                         │
+           ▼                         ▼
+      Speakers/AirPods        Core Audio tap
+      completely normal              │
+                                     ▼
+                              capture-helper
+                                     │
+                             16 kHz mono PCM
+                                     │
+                              rolling buffer
+                                     │
+                ┌────────────────────┴──────────────┐
+                │                                   │
+             dormant                         policy/hotkey
+                                                    │
+                                         ASR → LLM assistance
+
+The crucial property is that your capture path is observational rather than part of the playback path.
+
+Apple's sample actually describes a tap as an input source, analogous to a microphone, and the global convenience constructors let you capture system output while excluding selected processes.
+
+There is a one-time macOS permission issue, but that's appropriate: Apple requires NSAudioCaptureUsageDescription, and macOS prompts the first time the app records from a tap.
+
+Why I'd prefer D even over A
+
+Your A is quite reasonable. ScreenCaptureKit supports audio capture, configurable sample rate/channel count, and exclusion of your own process. And because you also want the hotkey:
+
+“Explain what is currently on my screen”
+
+you're going to need ScreenCaptureKit/screen-recording permission anyway. Apple explicitly positions ScreenCaptureKit as its modern mechanism for capturing screen and audio content.
+
+But I wouldn't make ScreenCaptureKit responsible for continuous system-audio plumbing if Core Audio gives us an API whose abstraction is exactly “tap outgoing audio.”
+
+There is another practical consideration: as recently as March 2026, developers were reporting ScreenCaptureKit/replayd failures with long-running or repeatedly segmented audio capture. That's not proof that your implementation would fail, but it makes me less enthusiastic about choosing it for something intended to sit armed all day.
+
+So I'd divide responsibilities cleanly:
+
+Core Audio process tap     → always-available system audio
+normal mic capture         → always-available microphone
+ScreenCaptureKit           → screenshot / visual-content hotkey
+
+That separation also makes debugging much nicer.
+
+Your objection to B is important
+
+Technically you don't have to switch to BlackHole before every meeting. You could leave a Multi-Output Device selected permanently.
+
+But that isn't really better.
+
+BlackHole's own instructions require making the Multi-Output Device the Mac's sound output so that audio goes simultaneously to the real device and BlackHole. More annoyingly, macOS doesn't support normal volume control for a Multi-Output Device; volumes need to be managed on its component devices.
+
+That creates exactly the sort of permanent environmental disturbance I would avoid:
+
+Normal architecture:
+
+
+application → normal Mac audio → headphones
+
+
+
+
+BlackHole architecture:
+
+
+application → special Multi-Output Device
+                         ├─→ headphones
+                         └─→ BlackHole → assistant
+
+Your assistant has now become part of the user's audio configuration.
+
+With the Core Audio tap:
+
+application → normal Mac audio → headphones
+                    │
+                    └──── tap → assistant
+
+That's a much better failure mode. If your assistant crashes, your meeting audio should continue normally.
+
+I would also modify the “always available” concept slightly
+
+I would make capture always active but expensive processing mostly inactive.
+
+For example:
+
+SYSTEM AUDIO
+     │
+     ▼
+CoreAudio helper
+     │
+     ▼
+small in-memory rolling buffer
+perhaps 60–120 seconds
+     │
+     ├── no hotkey / no policy ──────► overwritten
+     │
+     ├── "What did he just say?" ────► ASR last 30 sec → LLM
+     │
+     ├── "Translate that" ───────────► ASR last 30 sec → LLM
+     │
+     └── meeting policy active ──────► continuous ASR/policy engine
+
+That distinction matters. Always listening doesn't have to mean always transcribing, always calling an LLM, or always saving audio.
+
+The helper can simply keep PCM in RAM until something asks for it.
+
+That also enables a particularly useful interaction:
+
+⌥⌘A    Explain the last 30 seconds of audio
+⌥⌘T    Translate the last 30 seconds
+⌥⌘S    Capture screenshot only
+⌥⌘E    Capture screenshot + explain
+
+The screenshot-only versus screenshot-plus-interpretation distinction fits especially well here: the capture mechanisms remain lightweight primitives, while the invocation decides whether an LLM ever sees the material.
+
+Keep system and microphone audio separate
+
+I would not immediately mix mic + system audio into a single PCM stream.
+
+Keep:
+
+system.pcm ─────► remote participants / videos / desktop audio
+
+
+mic.pcm ────────► you / people physically around you
+
+and timestamp both.
+
+Then downstream you can decide whether to use one or both.
+
+That's particularly useful during a meeting. If you say:
+
+“Wait, does that API guarantee ordering?”
+
+you don't really want the system interpreting your own question as something another participant asserted.
+
+It also leaves room for better speaker/source attribution later.
+
+What I would implement for the MVA
+
+The Swift portion can stay extremely small:
+
+audio-capture-helper
+
+
+--system
+    Core Audio global process tap
+    exclude assistant's own audio
+    private tap
+    downmix/resample → 16 kHz mono
+    emit timestamped PCM
+
+
+--mic
+    ordinary microphone capture
+    downmix/resample → 16 kHz mono
+    emit timestamped PCM
+
+I'd actually make the output framing slightly richer than raw PCM:
+
+timestamp | source | length | PCM
+
+rather than literally dumping unframed samples forever.
+
+That costs almost nothing now and becomes valuable when you run the assistant in your two-Mac companion configuration:
+
+Mac A                              Mac B
+meeting/audio                      assistant
+─────────────                      ─────────
+CoreAudio tap
+     │
+timestamped PCM
+     │
+     └──────── network ──────────► ASR → policies → LLM
+
+The identical stream can instead go over a local pipe on the single-Mac configuration. Thus local vs. companion mode becomes a transport choice rather than an audio-capture architectural choice, which is exactly what you want for the eventual full system.
+
+Revised Phase-1 choice
+
+I therefore wouldn't choose C merely to save yourself from writing Swift.
+
+I'd make Phase 1:
+
+D. Minimal Core Audio tap helper + mic capture + RAM ring buffer.
+
+Don't initially implement clever app selection, meeting detection, persistence, mixing, etc. Just get:
+
+desktop audio → helper → PCM → ring buffer → hotkey → ASR → LLM
+
+working reliably.
+
+Use ScreenCaptureKit separately for screenshots.
+
+And retain BlackHole as a very useful diagnostic fallback: if you're ever unsure whether a bug is in your Core Audio helper or downstream processing, BlackHole + ffmpeg gives you an independent capture path with which to compare results.

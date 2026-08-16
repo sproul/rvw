@@ -1,0 +1,45 @@
+#!/usr/bin/python3
+"""Send one command to the running listening assistant and print its reply.
+
+Deliberately uses the system python and nothing but the standard library:
+this runs on every hotkey press, so start-up time is the whole design.
+
+    rvwctl EXPLAIN
+    rvwctl TOGGLE_CAPTURE
+    rvwctl STATUS
+"""
+
+import os
+import socket
+import sys
+
+reply_limit_bytes = 4096
+socket_path = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+                           "var", "run", "rvw.sock")
+
+
+def send_command(command_line):
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(5.0)
+    client.connect(socket_path)
+    with client:
+        client.sendall(command_line.encode("utf-8"))
+        return client.recv(reply_limit_bytes).decode("utf-8", "replace").strip()
+
+
+def main(arguments):
+    if not arguments:
+        print("FAIL usage: rvwctl COMMAND [arguments]", file=sys.stderr)
+        return 2
+    try:
+        reply = send_command(" ".join(arguments))
+    except OSError as error:
+        print("FAIL the assistant is not listening on %s (%s)" % (socket_path, error),
+              file=sys.stderr)
+        return 1
+    print(reply)
+    return 0 if reply.startswith("OK ") else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
