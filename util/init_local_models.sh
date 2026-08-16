@@ -29,7 +29,8 @@ llm_server_url=http://127.0.0.1:$llm_server_port/v1
 hf_token_file=$HOME/.huggingface_token
 lms_bin_dir=$HOME/.lmstudio/bin
 
-dry_mode=0                                              # set by --dry; suppresses every mutating command
+dry_mode=0                                              # set by -dry; suppresses every mutating command
+yes_mode=0                                              # set by -y/-yes; approves installs without prompting (like "yum -y")
 
 log_ok()   { echo "OK   $*"; }
 log_fail() { echo "FAIL $*" >&2; }
@@ -44,16 +45,9 @@ run_cmd() {
     "$@"
 }
 
-parse_args() {
-    local arg
-    for arg in "$@"; do
-        case $arg in
-            --dry) dry_mode=1 ;;
-            -*)    die "unknown option $arg" ;;
-            *)     llm_model=$arg ;;
-        esac
-    done
-    [[ $dry_mode -eq 1 ]] && log_ok "dry mode: no changes will be made"
+# Emit an assume-yes flag for an install command when yes mode is active, so installs run unattended.
+assume_yes_flag() {
+    [[ $yes_mode -eq 1 ]] && printf '%s' "$1"
     return 0
 }
 
@@ -100,7 +94,9 @@ install_ffmpeg_if_missing() {
         return 0
     fi
     require_command brew "needed to install ffmpeg"
-    run_cmd brew install ffmpeg || die "could not install ffmpeg"
+    local -a brew_env=()
+    [[ $yes_mode -eq 1 ]] && brew_env=(env NONINTERACTIVE=1)
+    run_cmd "${brew_env[@]}" brew install ffmpeg || die "could not install ffmpeg"
     log_ok "installed ffmpeg"
 }
 
@@ -128,7 +124,7 @@ start_llmster_daemon() {
 
 # A bare "owner/name" is resolved against the LM Studio Hub, so the full URL is needed for Hugging Face.
 download_llm_model() {
-    run_cmd lms get "https://huggingface.co/$llm_model" --mlx --yes || die "could not download $llm_model"
+    run_cmd lms get "https://huggingface.co/$llm_model" --mlx $(assume_yes_flag --yes) || die "could not download $llm_model"
     log_ok "downloaded $llm_model"
 }
 
@@ -280,7 +276,6 @@ SUMMARY
 }
 
 main() {
-    parse_args "$@"
     check_preconditions
     install_ffmpeg_if_missing
     install_llmster_if_missing
@@ -296,11 +291,49 @@ main() {
     print_summary
 }
 
-main "$@"
+debug_mode=''
+dry_mode=0
+t=`mktemp`; trap "rm $t*" EXIT
+verbose_mode=''
+while (( $# >= 1 )); do
+        case "$1" in
+                -dry)
+                        dry_mode=1
+                ;;
+                -q|-quiet)
+                        verbose_mode=''
+                ;;
+                -v|-verbose)
+                        verbose_mode=-v
+                ;;
+                -x)
+                        set -x
+                        debug_mode=-x
+                ;;
+                -y|-yes)
+                        yes_mode=1
+                ;;
+                -*)
+                        echo "FAIL unrecognized flag $1" 1>&2
+                        exit 1
+                ;;
+                *)
+                        break
+                ;;
+        esac
+        shift
+done
+
+[[ $dry_mode -eq 1 ]] && log_ok "dry mode: no changes will be made"
+[[ $# -ge 1 ]] && llm_model=$1
+
+main
 
 exit
 $dp/git/rvw/util/init_local_models.sh mlx-community/Qwen3.6-35B-A3B-4bit
-$dp/git/rvw/util/init_local_models.sh --dry
+$dp/git/rvw/util/init_local_models.sh -dry
 lms ps
 lms unload --all
 curl http://127.0.0.1:1234/v1/models
+exit
+$dp/git/rvw/util/init_local_models.sh -x -y
