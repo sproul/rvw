@@ -4,6 +4,8 @@ export PATH=$script_dir:$PATH
 
 set -o pipefail
 
-init_local_models.sh
+init_local_models.sh -x -y
+init_permissions.sh -open               # prompts for microphone, system audio, screen recording
 
 exit
+$dp/git/rvw/util/init.sh

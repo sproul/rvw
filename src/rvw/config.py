@@ -15,7 +15,11 @@ log_dir = var_dir / "log"
 run_dir = var_dir / "run"
 
 capture_helper_path = bin_dir / "audio_capture"
+screen_capture_helper_path = bin_dir / "screen_capture"
 control_socket_path = run_dir / "rvw.sock"
+
+# Canonical archive of saved screenshots, and in Phase 3 of saved transcripts.
+archive_dir = Path(os.environ.get("RVW_ARCHIVE_DIR", var_dir / "meetings"))
 
 debug_mode = False                      # set by --debug on the daemon command line
 
@@ -34,6 +38,8 @@ max_segment_seconds = 20.0
 # Transcript.
 transcript_retention_seconds = 1800.0
 explain_window_seconds = 60.0
+clarify_window_seconds = 45.0            # short: clarify is about the words just spoken
+interpret_window_seconds = 120.0         # context sent with a screenshot
 continuous_analysis_period_seconds = 120.0
 
 # Streams. "mic" is me, "system" is everything the Mac plays back.
@@ -49,6 +55,12 @@ llm_model = os.environ.get("RVW_LLM_MODEL", "meeting-assistant")
 llm_max_tokens = 3072                   # the reasoning model spends most of this on thinking
 llm_temperature = 0.3
 llm_request_timeout_seconds = 300.0
+vision_llm_model = os.environ.get("RVW_VLM_MODEL", "meeting-vision")
+
+# Screen capture. "frontmost" captures the frontmost application window only;
+# "display" captures the whole display and is therefore never chosen silently.
+screenshot_target = os.environ.get("RVW_SCREENSHOT_TARGET", "frontmost")
+screenshot_timeout_seconds = 20.0
 
 
 def require_known_stream(stream_name):

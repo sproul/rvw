@@ -1,0 +1,153 @@
+PHASE 2 - A USABLE ASSISTANT: CLARIFY AND SCREENSHOTS
+=====================================================
+Written 2026-08-16 on the M3 (96 GB), before the local models were available on
+this machine. Everything below is implemented and unit tested; what could not be
+verified without a model or without the screen recording permission is listed
+under "Still to verify".
+
+
+What is new
+-----------
+CLARIFY (alt-cmd-C)
+  A second transcript command over a shorter window, 45 s by default. Its prompt
+  asks for the words rather than the concepts: most likely verbatim wording
+  first, marked where it was repaired, then one or two sentences of meaning, and
+  the plausible readings where a passage is genuinely ambiguous. It assumes
+  misrecognition and a strong accent, which is what EXPLAIN does not.
+
+SCREENSHOT (alt-cmd-S)
+  Archival only. bin/screen_capture writes a PNG, the assistant writes a sidecar
+  JSON beside it, and nothing else happens: no OCR, no model, no network, no
+  visible UI. The Hammerspoon binding is silent on success precisely so that
+  nothing appears in a shared screen; a failure is still shown.
+
+INTERPRET_SCREEN (ctrl-alt-cmd-S)
+  The identical archival save, followed by a request to a local vision model
+  with the image and the last 120 s of transcript. The answer is streamed into
+  the assistant's own terminal, never onto the screen. If the save works and the
+  interpretation fails, the image is still archived: the save happens first and
+  the model request runs on a separate thread.
+
+
+Archive layout
+--------------
+  var/meetings/YYYY/MM/YYYY-MM-DD_HH.MM/screenshots/YYYY-MM-DD_HH.MM.SS.mmm.png
+                                                   /YYYY-MM-DD_HH.MM.SS.mmm.json
+
+The session directory is named from the time the assistant started, so one run
+collects its images in one place; the image name is the capture time to the
+millisecond, so a burst cannot collide and any image can be aligned with a
+transcript timestamp. Phase 3 can drop metadata.json and transcript.jsonl into
+the same session directory without moving anything. RVW_ARCHIVE_DIR moves the
+root; var/ is git ignored.
+
+The sidecar JSON records what the helper saw and what only the assistant knows:
+
+  {"application": "zoom.us", "bundle_id": "us.zoom.xos", "window_title": "Zoom
+   Meeting", "window_id": 5142, "target": "window", "width": 3024, "height":
+   1890, "bytes": 1442310, "captured_epoch": 1786552867.123, "captured_local":
+   "2026-08-15T23:41:07"}
+
+That metadata is nearly free at capture time and expensive to reconstruct later,
+which is the whole reason for writing it now.
+
+
+Design decisions
+----------------
+Screen capture is its own Swift helper, built by the same helper/build.sh with
+its own embedded Info.plist and its own ad hoc signature (ai.rvw.screen_capture),
+so the screen recording permission and any screen capture failure stay isolated
+from audio.
+
+The helper captures the frontmost application's largest on screen window using
+ScreenCaptureKit and SCScreenshotManager. Whole display capture exists as
+--target display (RVW_SCREENSHOT_TARGET=display) but is never chosen
+automatically: if the frontmost window cannot be resolved the helper fails and
+says to ask for the display explicitly, rather than quietly archiving the whole
+desktop.
+
+EXPLAIN, CLARIFY and INTERPRET_SCREEN share one answering path in the assistant:
+one lock, one streaming thread, one session log record, one terminal rendering.
+The difference between them is a prompt builder and which model client is used,
+so a fourth behaviour is a prompt plus a dispatcher entry. The three prompts
+share one transcript framing helper in src/rvw/prompts.py.
+
+The vision model is a second LocalLlm instance pointed at RVW_VLM_MODEL
+(default identifier "meeting-vision") on the same OpenAI compatible endpoint,
+so no new transport, and Phase 7 can move both at once. The image is inlined as
+a base64 data URI because the endpoint takes no file paths.
+
+At start-up the assistant now also says whether a vision model is loaded. An
+absent vision model is reported as information, not as a failure: archiving
+screenshots does not need one.
+
+
+Permissions
+-----------
+All of them are now checked and requested by one script, util/init_permissions.sh,
+called from util/init.sh. It explains why each permission is needed, works out
+which application macOS will attribute the grants to, and probes each permission
+by performing the protected action with the real helper, because performing the
+action is the only way to raise the system prompt. A refusal is reported with the
+settings pane to open (-open opens it) and the tccutil command that makes macOS
+ask again (-reset does it).
+
+  Microphone        audio_capture --source mic
+  Audio Recording   audio_capture --source system, the Core Audio process tap
+  Screen Recording  screen_capture, ScreenCaptureKit
+  Accessibility     Hammerspoon, which owns the hotkeys
+
+Run on the M3 on 2026-08-16 from the IDE application (com.exafunction.windsurf):
+microphone and system audio are granted, screen recording had been declined, and
+Hammerspoon does not have Accessibility, so no hotkey works there yet.
+
+The grants follow the launching application, so Terminal.app, iTerm, Emacs.app
+and the IDE each prompt once; run the script from whichever one will launch
+bin/rvw. Hammerspoon's Accessibility grant is its own and is needed only once,
+because the hotkeys only send a command through a socket and the daemon spawns
+the helpers. Starting the daemon from Hammerspoon or from a LaunchAgent would
+move that responsibility; a LaunchAgent is the way to stop depending on the
+launching terminal altogether, which belongs in Phase 6.
+
+
+Still to verify
+---------------
+1. A real screenshot. Screen Recording had already been declined for the
+   application used to write this code, so the helper correctly refused:
+
+     FAIL cannot list the shareable screen content (The user declined TCCs ...)
+
+   Grant it with util/init_permissions.sh -open, or reset the decision with
+   util/init_permissions.sh -reset, then run
+     bin/screen_capture --output /tmp/shot.png --target frontmost
+   and check the JSON it prints and that the PNG shows the frontmost window and
+   nothing else.
+
+2. CLARIFY against a real model, once mlx-community/Qwen3.6-35B-A3B-4bit has
+   finished downloading and util/init_local_models.sh has loaded it as
+   "meeting-assistant". Measure hotkey to first token and hotkey to last token,
+   and sysctl vm.swapusage before and after; the Phase 1 acceptance test on the
+   M3 is still outstanding for the same reason.
+
+3. INTERPRET_SCREEN has never spoken to a vision model: no VLM is downloaded on
+   this machine. Load one as the identifier "meeting-vision", for example an MLX
+   Qwen3-VL build, then press ctrl-alt-cmd-S. Until then the command archives
+   the image and reports that the model is missing.
+
+4. The microphone stream, still unverified from Phase 1 as a stream, although
+   the permission itself is granted on this machine and the helper starts and
+   reports "capturing the microphone".
+
+5. Hammerspoon needs Accessibility before any hotkey works on the M3; today
+   every command has only ever been sent through bin/rvwctl.
+
+
+Rough edges
+-----------
+- Only one answer runs at a time, so pressing CLARIFY while an EXPLAIN is
+  streaming is refused rather than queued.
+- The interpretation is printed in the assistant terminal. That is private only
+  as long as that terminal is not the window being shared.
+- Multi display setups: --target display captures the main display only.
+- The archive lives under var/, which is git ignored; Phase 3 will have to
+  decide where canonical meeting data really belongs.

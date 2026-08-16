@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 
-from . import config, prompts, session_log
+from . import config, prompts, screenshot, session_log
 from .asr import WhisperTranscriber
 from .audio_source import CaptureStream
 from .commands import CommandDispatcher
@@ -35,12 +35,14 @@ class Assistant:
         self._streams = {name: CaptureStream(name, self._recognizer.submit)
                          for name in stream_names}
         self._llm = LocalLlm()
+        self._vision_llm = LocalLlm(model=config.vision_llm_model)
         self._dispatcher = self._build_dispatcher()
         self._control = ControlSocketServer(self._dispatcher)
-        self._explaining = threading.Lock()
+        self._answering = threading.Lock()
         self._continuous_analysis = threading.Event()
         self._quit_requested = threading.Event()
         self._last_continuous_analysis = 0.0
+        self._session_started_epoch = time.time()
         self._log_path = None
 
     # -- lifecycle ---------------------------------------------------------
@@ -87,6 +89,7 @@ class Assistant:
         log.info("OK  local LLM at %s serving %s", config.llm_base_url,
                  ", ".join(served) or "no loaded model")
         self._warn_if_the_configured_model_is_missing(served)
+        self._note_whether_the_vision_model_is_loaded(served)
 
     @staticmethod
     def _warn_if_the_configured_model_is_missing(served_models):
@@ -97,15 +100,33 @@ class Assistant:
                   "or point RVW_LLM_MODEL at one of: %s",
                   config.llm_model, config.llm_model, ", ".join(served_models) or "nothing")
 
+    @staticmethod
+    def _note_whether_the_vision_model_is_loaded(served_models):
+        """Interpretation is optional, so an absent vision model is news, not a failure."""
+        if config.vision_llm_model in served_models:
+            log.info("OK  vision model %s is loaded, so screenshots can be interpreted",
+                     config.vision_llm_model)
+            return
+        log.info("OK  no vision model %s is loaded; alt-cmd-S still archives screenshots, "
+                 "ctrl-alt-cmd-S will report the missing model",
+                 config.vision_llm_model)
+
     def _print_ready_banner(self):
         log.info("OK  ready. Hotkeys: alt-cmd-R capture, ctrl-alt-cmd-R capture and analyse, "
-                 "alt-cmd-E explain the last %d seconds", int(config.explain_window_seconds))
+                 "alt-cmd-E explain the last %ds, alt-cmd-C clarify the last %ds, "
+                 "alt-cmd-S screenshot, ctrl-alt-cmd-S screenshot and interpret",
+                 int(config.explain_window_seconds), int(config.clarify_window_seconds))
+        log.info("OK  screenshots are archived under %s",
+                 screenshot.session_archive_dir(self._session_started_epoch))
 
     # -- commands ----------------------------------------------------------
 
     def _build_dispatcher(self):
         dispatcher = CommandDispatcher()
-        for name, handler in [("EXPLAIN", self._command_explain),
+        for name, handler in [("CLARIFY", self._command_clarify),
+                              ("EXPLAIN", self._command_explain),
+                              ("INTERPRET_SCREEN", self._command_interpret_screen),
+                              ("SCREENSHOT", self._command_screenshot),
                               ("START_CAPTURE", self._command_start_capture),
                               ("STATUS", self._command_status),
                               ("STOP_CAPTURE", self._command_stop_capture),
@@ -138,14 +159,29 @@ class Assistant:
         return "continuous analysis on, every %ds" % config.continuous_analysis_period_seconds
 
     def _command_explain(self, arguments):
-        window_seconds = float(arguments[0]) if arguments else config.explain_window_seconds
+        return self._start_transcript_answer(prompts.build_explain_messages, arguments,
+                                             config.explain_window_seconds, "explanation")
+
+    def _command_clarify(self, arguments):
+        return self._start_transcript_answer(prompts.build_clarify_messages, arguments,
+                                             config.clarify_window_seconds, "clarification")
+
+    def _command_screenshot(self, arguments):
+        """Archival only: no OCR, no model, no network, nothing on screen."""
+        saved = screenshot.capture_screenshot(self._session_started_epoch)
+        return "screenshot saved as %s" % saved.image_path.name
+
+    def _command_interpret_screen(self, arguments):
+        """The same archival save, then a private interpretation in this terminal."""
+        saved = screenshot.capture_screenshot(self._session_started_epoch)
+        window_seconds = self._requested_window_seconds(arguments,
+                                                       config.interpret_window_seconds)
         transcript_text = self._transcript.render_window(window_seconds, now=time.time())
-        messages = prompts.build_explain_messages(transcript_text, window_seconds)
-        if not self._explaining.acquire(blocking=False):
-            return "an explanation is already in progress"
-        threading.Thread(target=self._answer, args=(messages, transcript_text),
-                         name="rvw-explain", daemon=True).start()
-        return "explaining the last %ds" % window_seconds
+        messages = prompts.build_interpret_messages(
+            transcript_text, screenshot.read_image_as_data_uri(saved.image_path), window_seconds)
+        return "screenshot saved as %s; %s" % (
+            saved.image_path.name,
+            self._start_answer(self._vision_llm, messages, transcript_text, "interpretation"))
 
     def _command_status(self, arguments):
         running = [name for name, stream in self._streams.items() if stream.is_running]
@@ -159,6 +195,28 @@ class Assistant:
         return "shutting down"
 
     # -- helpers -----------------------------------------------------------
+
+    def _start_transcript_answer(self, build_messages, arguments, default_window_seconds,
+                                 heading):
+        """Ask the text model about the recent transcript; EXPLAIN and CLARIFY differ only here."""
+        window_seconds = self._requested_window_seconds(arguments, default_window_seconds)
+        transcript_text = self._transcript.render_window(window_seconds, now=time.time())
+        messages = build_messages(transcript_text, window_seconds)
+        return "%s of the last %ds: %s" % (
+            heading, window_seconds,
+            self._start_answer(self._llm, messages, transcript_text, heading))
+
+    @staticmethod
+    def _requested_window_seconds(arguments, default_window_seconds):
+        return float(arguments[0]) if arguments else default_window_seconds
+
+    def _start_answer(self, llm, messages, context_text, heading):
+        """One model request at a time; the GPU and the terminal are both single resources."""
+        if not self._answering.acquire(blocking=False):
+            return "an answer is already in progress"
+        threading.Thread(target=self._answer, args=(llm, messages, context_text, heading),
+                         name="rvw-answer", daemon=True).start()
+        return "answering in the assistant terminal"
 
     def _requested_stream_names(self, arguments):
         """Streams named on the command line, or every stream this run offers."""
@@ -186,24 +244,24 @@ class Assistant:
         log.info("%s", self._dispatcher.dispatch("EXPLAIN %d"
                                                  % config.continuous_analysis_period_seconds))
 
-    def _answer(self, messages, transcript_text):
-        """Stream one explanation to the terminal and record it in the session log."""
+    def _answer(self, llm, messages, context_text, heading):
+        """Stream one answer to the terminal and record it in the session log."""
         try:
-            self._stream_answer_to_terminal(messages, transcript_text)
+            self._stream_answer_to_terminal(llm, messages, context_text, heading)
         except Exception as error:
-            log.error("FAIL explanation: %s", error)
+            log.error("FAIL %s: %s", heading, error)
         finally:
-            self._explaining.release()
+            self._answering.release()
 
-    def _stream_answer_to_terminal(self, messages, transcript_text):
+    def _stream_answer_to_terminal(self, llm, messages, context_text, heading):
         started = time.monotonic()
-        sys.stdout.write("\n----- explanation -----\n")
-        answer = self._llm.stream_chat(messages, self._write_token)
-        sys.stdout.write("\n-----------------------\n")
+        sys.stdout.write("\n----- %s -----\n" % heading)
+        answer = llm.stream_chat(messages, self._write_token)
+        sys.stdout.write("\n%s\n" % ("-" * (len(heading) + 12)))
         sys.stdout.flush()
-        log.debug("OK  explanation produced in %.1fs", time.monotonic() - started)
-        session_log.write_answer_record(self._log_path, "transcript window", transcript_text)
-        session_log.write_answer_record(self._log_path, "explanation", answer)
+        log.debug("OK  %s produced in %.1fs", heading, time.monotonic() - started)
+        session_log.write_answer_record(self._log_path, "transcript window", context_text)
+        session_log.write_answer_record(self._log_path, heading, answer)
 
     @staticmethod
     def _write_token(token):

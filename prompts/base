@@ -29,13 +29,20 @@ The system should eventually choose appropriately sized local models for each ma
 9. Every phase should end in something runnable and testable.
 10. Prefer a CLI or minimal menu-bar utility over a sophisticated GUI until the core system proves useful.
 
-# CURRENT STATE — updated 2026-08-15 after Phase 1 (m4)
+# CURRENT STATE — updated 2026-08-16 after Phase 2 (m3)
 
-Phases 0 and 1 are implemented and verified on the M4 Air. See `doc/phase1` for
-the design decisions and measurements, and `AGENTS.md` for the commands.
+Phases 0 and 1 are implemented and verified on the M4 Air. Phase 2 is
+implemented on the M3 but not yet verified against a model or a granted screen
+recording permission. See `doc/phase1` and `doc/phase2` for the design
+decisions and measurements, and `AGENTS.md` for the commands.
 
 What exists in the repository:
 
+* `helper/screen_capture.swift` → `bin/screen_capture`, built by the same
+  `helper/build.sh`. It captures the frontmost application's largest on screen
+  window with ScreenCaptureKit, writes a PNG and prints its metadata as JSON;
+  `--target display` captures the whole main display and is never chosen
+  automatically.
 * `helper/audio_capture.swift` → `bin/audio_capture`, built by `helper/build.sh`.
   `--source system` uses a Core Audio process tap (observational, no virtual
   device, playback unaffected); `--source mic` uses AVAudioEngine. Both emit
@@ -46,17 +53,29 @@ What exists in the repository:
   `recognizer` (single mlx-whisper worker), `transcript` (rolling, timestamped,
   one stream per source), `llm` (streaming OpenAI-compatible client),
   `commands` (transport independent dispatcher), `control` (unix socket),
-  `prompts`, `session_log`, `config`, `assistant`.
+  `prompts`, `screenshot` (archival save plus sidecar metadata), `session_log`,
+  `config`, `assistant`.
 * `bin/rvw` (daemon) and `bin/rvwctl` (hotkey client, system python, stdlib
   only). `hammerspoon/rvw_hotkeys.lua` binds the keys and is required from
   `~/.hammerspoon/init.lua`.
-* `test/` with 29 unittest tests, run by `util/run_tests.sh`.
-* `util/init_local_models.sh` installs and verifies the model stack.
+* `test/` with 62 unittest tests, run by `util/run_tests.sh`.
+* `util/init_local_models.sh` installs and verifies the model stack, and
+  `util/init_permissions.sh` explains, probes and reports every macOS privacy
+  permission (Microphone, Audio Recording, Screen Recording, Accessibility);
+  `util/init.sh` runs both.
 
-Commands understood today: `EXPLAIN [seconds]`, `START_CAPTURE [streams]`,
+Commands understood today: `EXPLAIN [seconds]`, `CLARIFY [seconds]`,
+`SCREENSHOT`, `INTERPRET_SCREEN [seconds]`, `START_CAPTURE [streams]`,
 `STOP_CAPTURE`, `TOGGLE_CAPTURE`, `TOGGLE_CONTINUOUS`, `STATUS`, `QUIT`.
 Hotkeys today: alt-cmd-R capture, ctrl-alt-cmd-R capture and analyse,
-alt-cmd-E explain the last 60 seconds.
+alt-cmd-E explain the last 60 seconds, alt-cmd-C clarify the last 45 seconds,
+alt-cmd-S screenshot, ctrl-alt-cmd-S screenshot and interpret.
+
+Archived screenshots live in
+`var/meetings/YYYY/MM/YYYY-MM-DD_HH.MM/screenshots/`, one PNG plus one sidecar
+JSON per capture, named by capture time to the millisecond; `RVW_ARCHIVE_DIR`
+moves the root. Phase 3 should put its transcripts in the same session
+directory.
 
 What was learned, and what it changes:
 
@@ -82,18 +101,41 @@ What was learned, and what it changes:
    permission, and Phase 7 can redirect the same client at the companion Mac.
    Keep new actions as dispatcher commands, never as inline hotkey logic.
 7. Permissions are granted to the application that launches the helper, not to
-   the helper. Running from a different terminal or IDE means granting again,
-   and once a grant has been denied macOS stops prompting: the fix is System
-   Settings, Privacy and Security, or `tccutil reset Microphone <bundle-id>`.
-   As of this writing the microphone stream is still unverified end to end for
-   exactly this reason; system audio is verified.
-8. Anything that can fail must fail where the user is looking. A capture helper
+   the helper, and Accessibility is granted to Hammerspoon. Running from a
+   different terminal or IDE means granting again, and once a grant has been
+   denied macOS stops prompting. There is no API to grant one: the only way to
+   raise the prompt is to perform the protected action, so
+   `util/init_permissions.sh` probes each permission with the real helper and
+   prints the settings pane and the `tccutil reset` command for whatever is
+   missing. Keep every new permission in that one script, with the reason.
+   Measured there on the M3 on 2026-08-16: microphone and system audio granted,
+   screen recording declined, Hammerspoon without Accessibility.
+8. Every model-facing action shares one answering path in `assistant.py`: one
+   lock, one streaming thread, one session log record. EXPLAIN, CLARIFY and
+   INTERPRET_SCREEN differ only in the prompt builder and the model client, so
+   a fourth behaviour is a prompt plus a dispatcher entry, not new machinery.
+9. Screenshots are canonical data and are saved before, and independently of,
+   any interpretation: an interpretation failure never costs the image.
+10. Actions that happen during a screen share must be silent. The Hammerspoon
+   bindings for the screenshot actions show nothing on success and the
+   interpretation is streamed into the assistant's own terminal only.
+11. Anything that can fail must fail where the user is looking. A capture helper
    that dies at start-up is now reported as FAIL by the command that started it
    rather than answering OK, and a missing LLM model is reported at start-up
    rather than when the hotkey is pressed mid-conversation. Keep that habit:
    commands report the truth about the state they leave behind.
 
-Known rough edges: continuous analysis is a plain timer re-running EXPLAIN;
+Not yet verified on the M3: any real screenshot (the application used for the
+work had been denied Screen Recording), any hotkey at all (Hammerspoon has no
+Accessibility permission there, so commands were sent with `bin/rvwctl`),
+CLARIFY against a real model, and
+INTERPRET_SCREEN, for which no vision model is downloaded; load one under the
+identifier `meeting-vision` or set `RVW_VLM_MODEL`. The Phase 1 acceptance test
+and its swap and latency measurements are also still outstanding on the M3.
+
+Known rough edges: only one answer runs at a time, so a second hotkey during a
+streaming answer is refused rather than queued; continuous analysis is a plain
+timer re-running EXPLAIN;
 Whisper checks Hugging Face for the model revision at start-up unless
 `HF_HUB_OFFLINE=1`; the recognition language is fixed by `RVW_WHISPER_LANGUAGE`.
 
@@ -217,7 +259,7 @@ Air.
 
 ---
 
-# PHASE 2 — Make the MVA genuinely usable (NEXT, on m3)
+# PHASE 2 — Make the MVA genuinely usable (IMPLEMENTED on m3, verification open)
 
 Add only high-value functionality.
 
