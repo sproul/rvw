@@ -1,0 +1,482 @@
+# Build a Local Mac Listening Assistant — Phased Toward an MVA
+
+I want to build a macOS listening assistant that can help me understand live conversations, meetings, technical discussions, and foreign-language speech.
+
+The eventual system should work with Zoom, Google Meet, Microsoft Teams, arbitrary applications producing audio, and in-person conversations. It should support both:
+
+1. **Single-Mac mode** — capture, transcription, LLM inference, UI, and archive all run on one Mac.
+2. **Two-Mac companion mode** — one Mac handles the meeting while a second Mac receives audio/video and performs transcription, inference, archiving, and displays the assistant UI.
+
+However, **do not build the final architecture first**. Optimize aggressively for reaching a Minimum Viable Assistant (MVA) quickly, while making early architectural choices that do not block the later design.
+
+My machines are:
+
+* MacBook Pro M3, 96 GB unified RAM
+* MacBook Air M4, 32 GB unified RAM
+
+The system should eventually choose appropriately sized local models for each machine.
+
+## Core principles
+
+1. Local-first. Audio, transcripts, screenshots, and LLM inference should remain local by default.
+2. Conferencing-platform-independent. Do not make Zoom, Meet, or Teams APIs part of the core architecture.
+3. The same user experience should work in single-Mac and two-Mac configurations.
+4. Continuous speech recognition is acceptable; expensive LLM inference should normally happen only on demand.
+5. Transcript retention must be optional per conversation.
+6. Saved screenshots and transcripts are canonical data; indexes and embeddings should be considered rebuildable derived data.
+7. Do not synchronize a live SQLite/vector database between Macs. Synchronize canonical immutable/archive files instead and rebuild local indexes.
+8. Avoid unnecessary abstractions before the MVA works.
+9. Every phase should end in something runnable and testable.
+10. Prefer a CLI or minimal menu-bar utility over a sophisticated GUI until the core system proves useful.
+
+# PHASE 0 — Technical spike
+
+Goal: prove the critical components independently before integrating them.
+
+Perform small experiments for:
+
+### Audio capture
+
+Prove that we can obtain usable audio from:
+
+* the Mac microphone;
+* Mac system audio from arbitrary applications.
+
+Do not add Zoom-specific integration.
+
+### Local speech recognition
+
+Evaluate an Apple-Silicon-friendly local ASR implementation, initially using Whisper or an appropriate optimized implementation such as MLX/whisper.cpp.
+
+Requirements:
+
+* incremental or near-real-time transcription;
+* timestamps;
+* acceptable latency;
+* support for English, German, French;
+* architecture capable of later testing Swiss-German-specific models.
+
+### Local LLM
+
+Run one useful local instruct model on each hardware class.
+
+Initial goal:
+
+* 96 GB M3: test a strong approximately 30–40B-class model or suitable MoE.
+* 32 GB M4 Air: test a substantially smaller model that leaves enough RAM for ASR and ordinary applications.
+
+Do not spend excessive time benchmarking models yet. We need one workable model per machine.
+
+### Global hotkey
+
+Prove that a background process can detect a configurable global macOS hotkey.
+
+Deliverable:
+
+A short technical-spike report and runnable commands/scripts demonstrating each component.
+
+Do not proceed by designing the entire product before these work.
+
+---
+
+# PHASE 1 — Minimum Viable Assistant
+
+This is the highest priority.
+
+Build the smallest end-to-end system that I can actually use during a conversation.
+
+Required behavior:
+
+1. Continuously listen to one selectable source:
+
+   * microphone OR
+   * system audio.
+
+2. Continuously produce a rolling transcript locally.
+
+3. Maintain at least the previous several minutes in memory.
+
+4. Provide one global hotkey:
+
+   **EXPLAIN LAST 60 SECONDS**
+
+5. When pressed:
+
+   * take approximately the previous 60 seconds of transcript;
+   * send only that text to the local LLM;
+   * ask it to explain/reconstruct what was said;
+   * display the answer locally.
+
+The MVA does NOT need:
+
+* transcript persistence;
+* screenshots;
+* vector search;
+* multi-machine support;
+* polished GUI;
+* speaker identification;
+* automatic language detection if that complicates things;
+* cloud LLMs;
+* vision models.
+
+A terminal window is acceptable for the first MVA.
+
+### MVA prompt behavior
+
+The default explanation prompt should roughly mean:
+
+"Explain what was just said to a technically competent listener. Reconstruct likely transcription errors when context makes the intended meaning reasonably clear. Identify specialized terminology or references that might make the discussion difficult to follow. Distinguish what the speaker actually said from your explanation or inference. If uncertain, say so rather than inventing details."
+
+### MVA acceptance test
+
+I should be able to:
+
+1. start the assistant;
+2. play or participate in a technical conversation;
+3. let transcription run for several minutes;
+4. press one hotkey;
+5. receive a useful explanation of the preceding minute without sending anything to an external service.
+
+Once this works, STOP and assess it before expanding scope.
+
+---
+
+# PHASE 2 — Make the MVA genuinely usable
+
+Add only high-value functionality.
+
+## Multiple hotkeys
+
+Implement configurable global actions:
+
+### Clarify
+
+Clarify/reconstruct the last approximately 30–60 seconds.
+
+Useful particularly when speech recognition or an accent made the words difficult to parse.
+
+### Explain
+
+Explain the last approximately 60–120 seconds, especially:
+
+* technical terminology;
+* schools of thought;
+* architectural patterns;
+* unfamiliar conceptual references;
+* implicit assumptions.
+
+### Screenshot — SAVE ONLY
+
+This is high priority.
+
+On hotkey:
+
+* capture the current screen or configured display;
+* save the image locally;
+* timestamp it;
+* do NOT invoke OCR, LLM, VLM, or other interpretation;
+* make no network request;
+* avoid visible UI if possible.
+
+The purpose is archival memory of what was on screen during the discussion.
+
+### Screenshot — SAVE + INTERPRET
+
+Lower priority.
+
+Perform the identical archival screenshot operation, then optionally pass a copy plus recent transcript context to a local vision-language model.
+
+This action should be private and should not intentionally display anything on the conferencing/shared screen. Ideally interpretation can be displayed separately or retrieved with another command.
+
+Do not delay SAVE ONLY while implementing image interpretation.
+
+---
+
+# PHASE 3 — Optional transcript retention
+
+Add explicit conversation state:
+
+* Ephemeral
+* Save transcript
+
+The default should be configurable.
+
+In ephemeral mode:
+
+* retain only enough recent transcript for the assistant;
+* discard it afterward.
+
+In retained mode:
+
+* save timestamped transcript chunks;
+* retain useful metadata;
+* associate saved screenshots with transcript timestamps.
+
+Use a durable, human-readable canonical representation such as JSONL plus optional rendered Markdown.
+
+Example conceptual structure:
+
+meetings/
+YYYY/
+MM/
+YYYY-MM-DD_name/
+metadata.json
+transcript.jsonl
+screenshots/
+timestamp.png
+
+Do not make SQLite the canonical archive.
+
+---
+
+# PHASE 4 — Searchable meeting memory
+
+Now make retained conversations useful as long-term memory.
+
+Requirements:
+
+1. Build a local full-text index over authorized transcripts.
+2. Add semantic/vector retrieval only if it provides material value.
+3. Indexes must be disposable and completely rebuildable from canonical transcript files.
+4. Search results must link back to:
+
+   * meeting/date;
+   * timestamp;
+   * original transcript passage;
+   * associated screenshots.
+
+Then add retrieval-augmented questions such as:
+
+"What instructions did they give me about reconnect behavior?"
+
+The system should:
+
+1. retrieve a small number of relevant transcript passages;
+2. give those passages to the local LLM;
+3. answer with references back to the source conversation.
+
+Never feed the entire historical archive to the LLM unnecessarily.
+
+---
+
+# PHASE 5 — Language comprehension profiles
+
+Do not build separate applications for different languages.
+
+Create prompt/profile behavior.
+
+## German profile
+
+My High German is functional but not fluent.
+
+Help especially with:
+
+* idioms;
+* slang;
+* subtleties;
+* humor;
+* wordplay;
+* culturally dependent references;
+* difficult constructions.
+
+Prefer explanations that help me improve my German rather than replacing all German with English.
+
+English should be available as a fallback.
+
+## Swiss German
+
+My Swiss German is very poor.
+
+Relatives generally switch to High German when addressing me, but speak Swiss German among themselves.
+
+Test specialized Swiss-German ASR models and, where useful:
+
+Swiss German speech
+→ Standard German transcription
+→ optional explanation/English
+
+## French profile
+
+I am fluent in French.
+
+Do NOT waste attention translating normal French or explaining long-established elementary idioms.
+
+My primary weakness is:
+
+* newly coined slang;
+* recently fashionable expressions;
+* current catchphrases;
+* contemporary cultural references;
+* ironic/new meanings;
+* expressions that may have appeared only recently.
+
+Design the architecture so current slang knowledge can eventually be refreshed independently of the base local model.
+
+A future freshness mechanism may perform an on-demand external lookup of only the unfamiliar phrase, rather than transmitting surrounding conversation.
+
+Do not implement external lookup until the local system is solid.
+
+---
+
+# PHASE 6 — Single-Mac polished operation
+
+Turn the prototype into a convenient Mac utility.
+
+Potential features:
+
+* menu-bar application;
+* source selection;
+* recording/retention indicator;
+* language/profile selection;
+* configurable hotkeys;
+* model selection;
+* rolling transcript window;
+* answer window;
+* silent screenshot capture;
+* safe behavior while the Mac is screen-sharing.
+
+Be especially careful that an LLM interpretation window does not unexpectedly appear in material I am sharing with meeting participants.
+
+---
+
+# PHASE 7 — Two-Mac companion mode
+
+Only after single-machine operation is mature.
+
+The goal is to run the same assistant while separating meeting presentation from AI processing.
+
+Possible topology:
+
+PRIMARY MAC
+
+* conferencing software;
+* ordinary audio/video output;
+* lightweight hotkey remote.
+
+SECONDARY MAC
+
+* receives audio/video;
+* ASR;
+* larger LLM/VLM;
+* transcript/archive;
+* assistant UI;
+* screenshots/interpretation.
+
+Investigate both:
+
+1. software-based display/audio routing;
+2. hardware capture, such as HDMI capture, where useful.
+
+Important architectural requirement:
+
+The user-facing commands and archive format must remain identical whether inference is local or delegated to the companion Mac.
+
+The primary-Mac hotkey agent should require no screen, camera, or microphone permissions merely to send commands such as:
+
+* CLARIFY
+* EXPLAIN
+* CAPTURE
+* INTERPRET
+
+Use a simple authenticated local-network protocol.
+
+Do not introduce distributed-systems complexity prematurely.
+
+---
+
+# PHASE 8 — Automatic hardware/model selection
+
+Once the functionality is mature:
+
+* detect available RAM/hardware;
+* maintain model profiles for the 96 GB M3 and 32 GB M4;
+* allow manual overrides;
+* use larger models on the M3 where useful;
+* keep enough headroom on the Air for conferencing, ASR, and normal desktop use.
+
+Benchmark using the actual assistant tasks rather than generic model benchmarks:
+
+1. accent/transcription cleanup;
+2. technical explanation;
+3. German nuance;
+4. French current-language explanation;
+5. screenshot/diagram interpretation.
+
+Prefer the smallest model whose answers are sufficiently good.
+
+---
+
+# Development discipline
+
+For every phase:
+
+1. State the smallest goal.
+2. Identify assumptions.
+3. Implement the minimum code needed.
+4. Give me exact run/test instructions.
+5. Add automated tests where they materially protect behavior.
+6. Measure latency and memory where relevant.
+7. Record design decisions briefly.
+8. Do not silently expand scope.
+9. Do not refactor working code merely to make the architecture prettier unless there is a concrete benefit.
+10. At the end of each phase, tell me:
+
+* what now works;
+* what remains rough;
+* what you recommend testing manually;
+* whether we have learned anything that should change the next phase.
+
+Most importantly:
+
+**Optimize for getting Phase 1 — the Minimum Viable Assistant — working quickly.**
+
+The first success criterion is not a beautiful architecture. It is that I can listen to a real conversation, press one key after something confusing is said, and get a useful private local explanation of the preceding minute.
+
+## MVA Architecture Guardrail
+
+Optimize aggressively for getting the Minimum Viable Assistant working quickly, **but do not achieve speed by making architectural choices that materially obstruct the eventual full system described in later phases.**
+
+In particular, preserve lightweight seams between:
+
+* audio acquisition;
+* speech recognition;
+* rolling transcript/state;
+* LLM inference;
+* hotkey/command dispatch;
+* transcript persistence;
+* screenshot capture;
+* user interface;
+* machine-to-machine transport.
+
+These do **not** need elaborate frameworks, plugin systems, dependency-injection infrastructure, or premature abstractions. Simple interfaces, processes, modules, or message structures are sufficient.
+
+The goal is:
+
+**minimal implementation now, replaceable components later.**
+
+Examples:
+
+* The MVA may support only one local ASR backend, but ASR should not be inseparably embedded in audio capture.
+* The MVA may support only one local LLM, but callers should not depend on that model's implementation details.
+* The MVA may run everything in one process, but hotkey actions should conceptually dispatch commands such as `CLARIFY` or `EXPLAIN`, so those commands can later execute on another Mac.
+* The MVA may keep transcript history only in RAM, but transcript records should already have timestamps and a stable structure suitable for later persistence.
+* Screenshot support need not exist in the MVA, but nothing should assume that transcript text is the only form of meeting context.
+* Do not introduce networking for the MVA merely because companion mode will eventually exist. Instead, make the boundary clear enough that a network transport can later replace an in-process call.
+
+When choosing between two implementations of similar effort, prefer the one that naturally extends toward:
+
+1. optional persistent transcripts;
+2. timestamp-associated screenshots;
+3. multiple language/comprehension profiles;
+4. different models on different hardware;
+5. single-Mac or two-Mac execution;
+6. searchable long-term meeting memory;
+7. local vision-language interpretation.
+
+However, **do not implement those future capabilities merely to prove extensibility**.
+
+A feature scheduled for a later phase should remain unimplemented until needed unless a small decision now would prevent expensive rework later.
+
+The desired development philosophy is:
+
+> Build the narrowest vertical slice that proves usefulness, while keeping the major component boundaries in the right places.

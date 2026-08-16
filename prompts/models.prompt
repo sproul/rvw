@@ -1,0 +1,8 @@
+Automate in the script ../util/init_local_models.sh what is needed to download, install and run
+whatever is needed to support programmatic running of particular local models for the following purposes:
+1.) s/w analysis and generation, and 
+2.) interpretation of recorded conversations.
+
+Specific models and software are mentioned in ../doc/models.summary
+
+More context and specific reasoning concerning these choices can be found in ../doc/models

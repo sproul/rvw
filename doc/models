@@ -1,0 +1,342 @@
+ChatGPT Plus
+
+
+
+
+
+Worked for 48s
+I’d choose Qwen3.6-35B-A3B, specifically a 4-bit MLX quantization, for that MacBook Air.
+
+It is unusually well matched to what you described: technical conversation, explaining code/concepts, generating code, and reviewing existing code. Qwen3.6 has 35B total parameters but only ~3B active parameters per token, so you get much of the knowledge/capacity benefit of a 35B-class model without the inference cost of a dense 35B model. Qwen specifically calls out improved repository-level reasoning and coding in this release. 
+
+Why I'd pick it
+For coding, the published results are quite strong. Qwen reports 73.4 SWE-bench Verified, 49.5 SWE-bench Pro, 51.5 Terminal-Bench 2.0, and 80.4 LiveCodeBench v6. More importantly for your use, it isn't narrowly a code-completion model: its general knowledge and reasoning results remain strong, which matters when the job is “listen to a technical discussion, understand what's going on, and explain it to me” rather than simply writing functions. 
+
+It also has a native 262K context window, potentially useful when feeding it substantial transcripts or source code. 
+
+On your 32-GB M4 Air
+I would run:
+
+mlx-community/Qwen3.6-35B-A3B-4bit
+
+The current MLX 4-bit build is about 20.4 GB, so it fits comfortably enough in 32 GB unified memory while leaving roughly 11 GB for macOS, the KV cache, application memory, etc. 
+
+I would not initially try to exploit the full 256K context window on a 32-GB machine. Start around 32K context, perhaps increase to 64K after seeing actual memory pressure. The model itself can handle vastly more; your RAM is the constraint. Qwen itself notes that context length should be reduced when memory is tight. 
+
+There's an important detail here: Ollama's ordinary Q4_K_M distribution is about 24 GB, while the MLX 4-bit build is about 20.4 GB. On a 32-GB Air, I'd strongly prefer the latter because those ~3–4 GB of extra headroom are valuable. 
+
+My ranking for your application
+Model	My view
+Qwen3.6-35B-A3B 4-bit MLX	Best choice
+Gemma 4 31B Q4	Excellent general alternative, but less attractive for coding
+Gemma 4 26B-A4B Q4	Very comfortable RAM footprint; good if responsiveness matters more
+Qwen3.6 27B	Strong, but dense; I prefer the 35B-A3B architecture here
+Qwen3-Coder-30B-A3B	Good coding specialist, but superseded for your mixed use by Qwen3.6
+Google estimates Gemma 4 31B Q4 at about 17.5 GB and the 26B-A4B Q4 at about 14.4 GB, so either would give you substantially more RAM headroom. 
+ But Qwen3.6 is the one I'd sacrifice those extra few GB for, given that code generation/review is a central part of the workload.
+
+One other reason I favor it for the listening-assistant system you've been designing: Qwen3.6 is multimodal and explicitly designed for long-context and agentic workflows. That gives us more room later to use the same model for transcript explanation, screenshots, coding help, tool calls, and repository inspection rather than assembling several unrelated specialist models. 
+
+So my concrete recommendation is: M4 Air 32 GB → Qwen3.6-35B-A3B → MLX → 4-bit → initially ~32K context.
+
+If you want, I can next recommend the best local serving stack for it on that Mac (MLX-LM vs LM Studio vs Ollama), including which is likely to give you the lowest latency for the real-time meeting-assistant use case.
+
+
+yes, best local serving stack, please
+
+Worked for 49s
+Yes. For your machine and the assistant you’re building, I’d use this stack:
+
+Qwen3.6-35B-A3B 4-bit MLX → LM Studio MLX runtime → llmster headless server → OpenAI-compatible API.
+
+LM Studio’s MLX engine is built on Apple’s MLX ecosystem (mlx-lm/mlx-vlm), so you retain the Apple-Silicon-native execution path rather than falling back to GGUF/llama.cpp. 
+
+Why LM Studio rather than raw mlx_lm.server
+If I were merely benchmarking models interactively, I’d be happy with raw mlx-lm. For the actual application, though, LM Studio gives you a much better service boundary without giving up MLX.
+
+You get a proper headless daemon called llmster, explicitly intended to run LM Studio without its GUI. It can run as a background service and load models on demand. 
+
+You also get all three interfaces:
+
+native LM Studio REST API
+
+OpenAI-compatible API
+
+Anthropic-compatible API
+
+The OpenAI-compatible interface includes /v1/chat/completions, /v1/responses, embeddings, structured output and tool use. 
+
+That means I'd architect your application against an OpenAI-style interface rather than against MLX directly:
+
+audio / transcript / screenshot / code
+                │
+                ▼
+       your assistant process
+                │
+        OpenAI-compatible HTTP
+                │
+                ▼
+        LM Studio / llmster
+                │
+            MLX engine
+                │
+                ▼
+      Qwen3.6-35B-A3B 4-bit
+That abstraction is valuable because you can later substitute another local model—or even a remote model—without rewriting the application.
+
+Another big advantage for your two-machine idea
+LM Studio can serve either on localhost or over the local network. Its CLI also supports operating on an LM Studio instance on another machine. 
+
+So your architecture naturally becomes:
+
+ONE-MAC MODE
+
+MacBook Air
+ ├── meeting assistant
+ ├── transcription
+ └── LM Studio + Qwen
+or:
+
+TWO-MAC MODE
+
+Meeting Mac                      Companion Mac
+───────────                      ─────────────
+meeting assistant ─── LAN ───► LM Studio
+transcription                    Qwen3.6-35B-A3B
+screenshots                      32 GB unified RAM
+Your application doesn't fundamentally care which arrangement it's running under. You just change:
+
+http://127.0.0.1:1234/v1
+to something like:
+
+http://companion-mac.local:1234/v1
+That is particularly attractive for the single-Mac/two-Mac architecture you wanted.
+
+Installation I would use
+You don't actually need the LM Studio GUI for the finished system. LM Studio recommends llmster for headless operation on Mac/Linux: 
+
+curl -fsSL https://lmstudio.ai/install.sh | bash
+
+lms daemon up
+Then search specifically for MLX versions:
+
+lms get qwen3.6-35b-a3b --mlx
+lms get --mlx restricts results to MLX models. 
+
+After downloading:
+
+lms ls
+Find the exact model key and initially load it with:
+
+lms load <model-key> \
+    --context-length 32768 \
+    --identifier meeting-assistant
+LM Studio lets you explicitly set context length and also has a memory estimator, so before trying 64K you can do:
+
+lms load --estimate-only <model-key> \
+    --context-length 65536
+The estimator accounts for context length and other model characteristics. 
+
+Then:
+
+lms server start
+Your program can then be almost boring
+For example, Python can use the ordinary OpenAI client while talking entirely to your Mac: 
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:1234/v1",
+    api_key="local"
+)
+
+response = client.chat.completions.create(
+    model="meeting-assistant",
+    messages=[
+        {
+            "role": "system",
+            "content": """
+You are a technical meeting assistant.
+Explain unfamiliar technical concepts concisely.
+For code, identify bugs and implementation implications.
+"""
+        },
+        {
+            "role": "user",
+            "content": transcript_fragment
+        }
+    ],
+)
+
+print(response.choices[0].message.content)
+That same code can talk to the second Mac simply by changing base_url.
+
+One LM Studio feature is especially useful on 32 GB
+It supports idle TTL and automatic model eviction. You can, for example, load the 35B model and tell LM Studio to release its ~large unified-memory allocation after an hour of inactivity:
+
+lms load <model-key> \
+    --context-length 32768 \
+    --ttl 3600
+The idle timer resets whenever the model receives another request. 
+
+That's much nicer on a 32-GB daily-use laptop than permanently losing most of your unified memory merely because the server happens to be running.
+
+Why not Ollama?
+Ollama is excellent, and it now directly offers qwen3.6:35b-a3b; its current package is about 24 GB and supports the model's 256K context capability. Ollama also accelerates Apple Silicon through Metal. 
+
+I wouldn't choose it here because your situation strongly favors MLX-native models, and LM Studio gives you MLX plus the operational conveniences I want for your application.
+
+I would rank the choices:
+
+Stack	For you
+LM Studio + MLX + llmster	★★★★★
+raw mlx-lm	★★★★☆
+Ollama	★★★★☆
+llama.cpp directly	★★★☆☆
+Raw mlx-lm is the one I would keep around as a benchmark/reference implementation. Apple's MLX-LM package is deliberately focused on running and fine-tuning LLMs on Apple Silicon, and its maintainers describe mlx_lm.server primarily as a local HTTP endpoint rather than a larger production serving platform. 
+
+One change from my previous recommendation
+I'd actually start with 32K context and test 16K as well, rather than assuming that more context is always better.
+
+For the real-time meeting assistant, you don't want to continually resend an enormous meeting transcript. The better architecture is:
+
+raw transcript archive
+        │
+        ├── recent verbatim window ──┐
+        │                            │
+        └── rolling summary ─────────┼──► LLM
+                                     │
+code/screenshots/relevant history ──┘
+That should dramatically reduce time-to-first-token, memory consumed by KV cache, and repeated prompt processing. The Qwen model itself supports a huge context, but your 32-GB Air shouldn't be asked to exercise it routinely. There are current reports of memory pressure/OOM with Qwen3.6-35B-A3B MLX at long context on Apple Silicon, reinforcing the case for intentionally controlling context. 
+
+So my production choice would be: llmster headless + LM Studio MLX runtime + Qwen3.6-35B-A3B 4-bit + 16–32K working context + OpenAI-compatible API.
+
+And I think the next architectural choice is even more consequential for responsiveness: how to divide work between a tiny fast model and this 35B model. For example, transcript triage/routing can potentially happen with a 3–8B model while only difficult explanations and code analysis go to Qwen3.6-35B. That could make the meeting assistant feel much closer to instantaneous on an M4 Air.
+
+
+I'm going to need to interpret technical conversations and generate code, but also to interpret recorded conversations. Should I use a specialized model for this last requirement?
+
+Worked for 41s
+Yes—but I would use the specialized model for hearing/transcribing the conversation, not for interpreting its meaning.
+
+I’d split the system into layers:
+
+recorded/live audio
+      │
+      ▼
+specialized speech model
+  transcription + timestamps
+      │
+      ├── speaker diarization
+      ▼
+speaker-labelled transcript
+      │
+      ▼
+Qwen3.6-35B-A3B
+  ├── explain conversation
+  ├── identify technical concepts
+  ├── explain jokes/idioms/ambiguities
+  ├── summarize decisions
+  ├── generate code
+  └── review code
+For your particular application, I'd start with Whisper large-v3-turbo as the speech model, running through MLX on the Mac. Whisper Turbo is an 809M-parameter model derived from large-v3; OpenAI describes it as substantially faster than large-v3 with only a small accuracy loss, and it remains multilingual. 
+ Apple maintains a Whisper implementation in its MLX examples specifically for Apple Silicon. 
+
+There is an especially important reason I'd initially choose Whisper over an otherwise very attractive alternative such as NVIDIA Parakeet: technical vocabulary. Whisper accepts an initial_prompt specifically so you can supply context, custom vocabulary and proper nouns to bias transcription toward the correct terminology. 
+ Thus, before a meeting you could feed the ASR layer something roughly like:
+
+Kubernetes, DuckDB, Parquet, WebLogic, Qwen,
+Interactive Brokers, pyannote, MLX, LangSmith...
+That capability could be quite valuable when a slightly garbled technical term would subsequently cause the LLM to misunderstand the entire exchange.
+
+I would add a second specialist: diarization
+For recorded conversations, knowing who said what can materially improve interpretation. I'd use pyannote speaker-diarization-community-1. It is specifically designed to turn audio into speaker-labelled segments, can run completely offline, and its new "exclusive speaker diarization" output is intended to make reconciliation with speech-recognition timestamps easier. Pyannote reports it as substantially improved over its previous 3.1 model on most of its diarization benchmarks. 
+
+So instead of giving Qwen this:
+
+I think we should change the cache.
+No, that's probably too expensive.
+What about doing it per ticker?
+That might work.
+you give it:
+
+[00:14:21] SPEAKER_1:
+I think we should change the cache.
+
+[00:14:25] SPEAKER_2:
+No, that's probably too expensive.
+
+[00:14:29] SPEAKER_1:
+What about doing it per ticker?
+
+[00:14:32] SPEAKER_2:
+That might work.
+That is much better source material for questions such as "What did Alice disagree with?", "What solution did they settle on?", or "Explain Bob's objection."
+
+There is one very interesting alternative: Parakeet
+I'd definitely benchmark NVIDIA Parakeet-TDT-0.6B-v3 against Whisper before freezing the architecture.
+
+It is only 600M parameters and is explicitly designed for high-throughput ASR. It gives punctuation, capitalization, and word-level and segment-level timestamps, supports long recordings, and handles 25 European languages including English, French, and German. 
+
+More interestingly, NVIDIA now provides NeMo-Speech.cpp, a lightweight C++ runtime with a Metal backend. It can run locally as a server and even provides an OpenAI-compatible audio API and real-time WebSocket transcription. 
+
+So I would test:
+
+                     ┌─ Whisper large-v3-turbo / MLX
+Audio ── ASR interface ┤
+                     └─ Parakeet 0.6B-v3 / NeMo-Speech.cpp
+and keep that interface abstract. Then changing the transcription engine doesn't affect the rest of your application.
+
+Whisper gets my initial vote because of technical-vocabulary prompting. Parakeet gets my vote as the first challenger because of its efficiency and excellent timestamp-oriented transcription architecture.
+
+What about an LLM that listens directly to the audio?
+This is where I'd not make it the primary pipeline—at least initially.
+
+There are now models such as Qwen3-Omni-30B-A3B that accept audio directly and reason about it. Qwen says it is designed for audio understanding as well as text/image/video, including real-time audio interaction. There is even a specialized Qwen3-Omni-30B-A3B-Captioner intended for fine-grained analysis of complex audio. 
+
+That can potentially recover information a transcript discards:
+
+hesitation
+sarcasm
+laughter
+interruptions
+raised voice
+uncertainty
+long pauses
+background sounds
+But I would use it as an optional second-pass audio analyzer, not as the routine transcription/reasoning engine. On a 32-GB MacBook Air, running another 30B-class multimodal model alongside your 35B reasoning model is an unattractive use of memory; Qwen itself notes that disabling just the speech-output component of Qwen3-Omni saves about 10 GB of GPU memory. 
+
+So the eventual architecture I'd aim for is:
+
+                     ┌─────────────────────────────┐
+Audio ──────────────►│ Whisper/Parakeet ASR        │
+                     └────────────┬────────────────┘
+                                  │ transcript
+                     ┌────────────▼────────────────┐
+Audio ──────────────►│ pyannote diarization        │
+                     └────────────┬────────────────┘
+                                  │
+                                  ▼
+                       enriched conversation
+                                  │
+                                  ▼
+                        Qwen3.6-35B-A3B
+                     reasoning / explanation /
+                       coding / code review
+                                  │
+                 difficult audio? │
+                                  ▼
+                       Qwen3-Omni optional
+                        audio second opinion
+This also has a very nice property for your one-Mac/two-Mac design: Whisper/Parakeet and diarization are relatively small, so the meeting Mac can do audio processing locally while the 35B model lives either on that same Mac or on the companion machine. 
+
+One caveat I'd explicitly test is Swiss German. Parakeet lists German but not Swiss German among its 25 supported languages, and Whisper's standard language set similarly treats German as the language rather than exposing Swiss German as a separate target. 
+ Given how important understanding Swiss German could be in your use case, I'd create a small real-world Swiss-German test corpus and compare Whisper, Parakeet, and potentially a Swiss-German-specialized ASR model before making the final ASR choice.
+
+So my current recommendation becomes three models with very different jobs, rather than three competing LLMs:
+
+Whisper Turbo → pyannote → Qwen3.6-35B-A3B.
+
+And I would keep Qwen3-Omni as an optional later enhancement for cases where understanding how something was said matters, rather than just what was said.
+
+
