@@ -1,0 +1,121 @@
+# PHASE 2 on the M3 — prompt for the agent working there
+
+Read `prompts/base` first, in full. It is the specification. This file adds the
+machine specific context and the exact scope for this session.
+
+
+## Where the work stands
+
+Phases 0 and 1 are implemented and were verified on the M4 Air (32 GB) on
+2026-08-15. Read `doc/phase1` for the design decisions and the measurements,
+and `AGENTS.md` for the commands. Read the CURRENT STATE section of
+`prompts/base` for what was learned and what must not be undone.
+
+The short version: audio capture is a Swift helper writing mono 16 kHz float32
+PCM on stdout, one process per source; microphone and system audio stay two
+separate streams; recognition is cut on silence; hotkeys live in Hammerspoon and
+send commands through `bin/rvwctl` to a unix socket, where a dispatcher runs
+them. Nothing about the user experience should change because it is running on
+a different Mac.
+
+
+## This machine
+
+MacBook Pro M3, 96 GB. Two things differ from the Air:
+
+1. The environment is not ready yet. `util/init_local_models.sh` is still
+   downloading the model stack, ETA 2026-08-15 23:40 PT. Do not start it again
+   and do not assume any model is present. Check first:
+   `lms ls`, `lms ps`, `curl -s http://127.0.0.1:1234/v1/models`,
+   and that `.venv/bin/python -c "import mlx_whisper"` succeeds. Until they are
+   ready, work on the parts that do not need a model: the screenshot helper, the
+   command wiring, the tests, the Hammerspoon bindings.
+2. With 96 GB, Qwen3.6-35B-A3B should run without swapping. On the 32 GB Air the
+   same model gave about 5 tokens/s and a 129 second explanation, because the
+   machine swapped 16.8 GB. Before doing anything else once the models finish,
+   re-run the Phase 1 acceptance test here and measure:
+   - time from the EXPLAIN hotkey to the first token, and to the last token;
+   - `sysctl vm.swapusage` before and after.
+   Record the numbers. They decide whether the Air needs a different model or
+   whether the whole approach needs a cheaper prompt.
+
+First thing to run when the downloads finish:
+
+    helper/build.sh
+    util/run_tests.sh
+    bin/rvw --source system --listen        (in one terminal)
+    bin/rvwctl EXPLAIN 60                   (in another, after some speech)
+
+`bin/audio_capture` must be built on this machine; it is not in git. Both the
+microphone and the system audio tap will prompt for permission the first time,
+and the grant goes to the application that launches the helper, so launch it
+from the terminal you intend to use.
+
+
+## Scope for this session
+
+In priority order. Do not start the next item until the previous one runs.
+
+### 1. CLARIFY (alt-cmd-C)
+
+A second explanation command over a shorter window, roughly 30 to 60 seconds,
+whose prompt is aimed at reconstructing what was said when the accent or the
+recognition made it hard to parse, rather than at explaining concepts. This is
+a new prompt builder in `src/rvw/prompts.py` and a new dispatcher command; the
+transcript, LLM and streaming code already exist and must not be duplicated.
+
+### 2. SCREENSHOT, SAVE ONLY (alt-cmd-S) — the high priority item
+
+Capture the screen, save it locally with a timestamp, and do nothing else. No
+OCR, no LLM, no vision model, no network, and as little visible UI as possible.
+
+Implement it as a separate Swift helper alongside `helper/audio_capture.swift`,
+built by the same `helper/build.sh`, with its own usage description in the
+embedded Info.plist. Prefer capturing the frontmost application's window with
+ScreenCaptureKit; fall back to the whole display only if the window filter turns
+out to be awkward, and say so rather than quietly capturing everything.
+
+Save the file with a timestamp and record which application and window it came
+from. The image and its metadata are canonical data in the sense of principle 6
+in `prompts/base`, so choose a layout now that Phase 3 can adopt unchanged;
+`doc/phase1` and the Phase 3 sketch in `prompts/base` describe the intended
+`meetings/YYYY/MM/...` shape. Do not build the rest of Phase 3.
+
+Be careful that nothing about this action appears in shared screen content.
+
+### 3. SCREENSHOT, SAVE AND INTERPRET (ctrl-alt-cmd-S) — lower priority
+
+The identical archival save, then optionally a copy plus recent transcript
+context to a local vision-language model. Do not delay item 2 for this, and do
+not let interpretation failures affect the archival save. The interpretation
+must not appear on a shared screen.
+
+
+## How to work
+
+The user's global rules apply and are strict. In particular:
+
+* TDD: write failing tests first, make them pass, then refactor. Tests are
+  plain unittest, run by `util/run_tests.sh`; there is no pytest in the venv.
+* snake_case, spaces not tabs, no unicode symbols, functions under about 25
+  lines, extract any four or more lines with a single purpose into a named
+  function, no comment that merely narrates the following lines.
+* Log messages start with "OK " or "FAIL ".
+* Wide reaching modes are globals in `src/rvw/config.py`, not parameters.
+* Paths are relative to the script, never absolute, and never with a fallback
+  location.
+* Fix bugs under 50 lines immediately without asking.
+* At the end, update `prompts/base` and `doc/` with what was learned, and save
+  the session transcript to
+  `$dp/git/doc/prompts/YYYY-MM-DD_HH.mm.$HOSTNAME.$IDE_NAME.$TASK`.
+
+Do not refactor working Phase 1 code for tidiness, do not add abstraction layers,
+and do not implement anything from Phases 3 to 8 beyond the small metadata
+decision noted above.
+
+
+## Report at the end
+
+What now works, what is rough, what should be tested manually, and whether
+anything learned should change the next phase — plus the M3 latency and swap
+measurements, since the model choice for both machines depends on them.

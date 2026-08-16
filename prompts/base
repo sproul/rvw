@@ -29,7 +29,67 @@ The system should eventually choose appropriately sized local models for each ma
 9. Every phase should end in something runnable and testable.
 10. Prefer a CLI or minimal menu-bar utility over a sophisticated GUI until the core system proves useful.
 
-# PHASE 0 — Technical spike
+# CURRENT STATE — updated 2026-08-15 after Phase 1 (m4)
+
+Phases 0 and 1 are implemented and verified on the M4 Air. See `doc/phase1` for
+the design decisions and measurements, and `AGENTS.md` for the commands.
+
+What exists in the repository:
+
+* `helper/audio_capture.swift` → `bin/audio_capture`, built by `helper/build.sh`.
+  `--source system` uses a Core Audio process tap (observational, no virtual
+  device, playback unaffected); `--source mic` uses AVAudioEngine. Both emit
+  mono 16 kHz float32 PCM on stdout. Usage descriptions are embedded with
+  `-sectcreate __info_plist` and the binary is ad hoc signed so the permission
+  grant survives rebuilds.
+* `src/rvw/` — the assistant: `segmenter` (silence-cut utterances),
+  `recognizer` (single mlx-whisper worker), `transcript` (rolling, timestamped,
+  one stream per source), `llm` (streaming OpenAI-compatible client),
+  `commands` (transport independent dispatcher), `control` (unix socket),
+  `prompts`, `session_log`, `config`, `assistant`.
+* `bin/rvw` (daemon) and `bin/rvwctl` (hotkey client, system python, stdlib
+  only). `hammerspoon/rvw_hotkeys.lua` binds the keys and is required from
+  `~/.hammerspoon/init.lua`.
+* `test/` with 29 unittest tests, run by `util/run_tests.sh`.
+* `util/init_local_models.sh` installs and verifies the model stack.
+
+Commands understood today: `EXPLAIN [seconds]`, `START_CAPTURE [streams]`,
+`STOP_CAPTURE`, `TOGGLE_CAPTURE`, `TOGGLE_CONTINUOUS`, `STATUS`, `QUIT`.
+Hotkeys today: alt-cmd-R capture, ctrl-alt-cmd-R capture and analyse,
+alt-cmd-E explain the last 60 seconds.
+
+What was learned, and what it changes:
+
+1. Microphone and system audio are captured as two separate helper processes and
+   two separate transcript streams, labelled "me" and "them". They are never
+   mixed into one PCM stream. Keep it that way: my own words must stay
+   separable for later analysis.
+2. Cutting recognition on silence rather than on fixed windows removed the
+   overlap and duplication problems entirely. Keep it.
+3. Whisper invents filler phrases such as "Thank you." when handed near
+   silence, so segments whose peak amplitude is low are discarded before
+   recognition. Any new audio path must go through the same gate.
+4. Model sizing is no longer a Phase 8 concern. On the 32 GB M4 Air, the 20.4 GB
+   Qwen3.6-35B-A3B drove the machine into 16.8 GB of swap, generation fell to
+   about 5 tokens/s, and one 60 second explanation took 129 seconds — unusable
+   live. Recognition itself is fast: 9.9 s of audio in 1.0 s. The 96 GB M3
+   should run the 35B comfortably; the Air needs a substantially smaller model.
+   `RVW_LLM_MODEL` and `RVW_LLM_URL` switch models with no code change.
+5. This model is a reasoning model and ignores `enable_thinking=false` in LM
+   Studio, so most of the token budget goes on reasoning. Reasoning tokens are
+   kept out of the printed answer, and the token budget must allow for them.
+6. Hammerspoon owning the hotkeys means the assistant needs no accessibility
+   permission, and Phase 7 can redirect the same client at the companion Mac.
+   Keep new actions as dispatcher commands, never as inline hotkey logic.
+7. Permissions are granted to the application that launches the helper, not to
+   the helper. Running from a different terminal or IDE means granting again.
+
+Known rough edges: continuous analysis is a plain timer re-running EXPLAIN;
+Whisper checks Hugging Face for the model revision at start-up unless
+`HF_HUB_OFFLINE=1`; the recognition language is fixed by `RVW_WHISPER_LANGUAGE`.
+
+
+# PHASE 0 — Technical spike (DONE on m4)
 
 Goal: prove the critical components independently before integrating them.
 
@@ -79,7 +139,7 @@ Do not proceed by designing the entire product before these work.
 
 ---
 
-# PHASE 1 — Minimum Viable Assistant
+# PHASE 1 — Minimum Viable Assistant (DONE on m4, model sizing still open)
 
 This is the highest priority.
 
@@ -139,11 +199,33 @@ I should be able to:
 
 Once this works, STOP and assess it before expanding scope.
 
+Assessed 2026-08-15 on the M4 Air: the acceptance test passes on content — the
+explanation was correct and it repaired a transcription error ("least timeout"
+→ "lease timeout") while saying that it had done so — but not on latency, for
+the memory reason recorded under CURRENT STATE. Re-run this acceptance test on
+the M3 before starting Phase 2 work there, and again with a smaller model on the
+Air.
+
 ---
 
-# PHASE 2 — Make the MVA genuinely usable
+# PHASE 2 — Make the MVA genuinely usable (NEXT, on m3)
 
 Add only high-value functionality.
+
+Build on what Phase 1 already established rather than inventing a second
+mechanism: every new action is a command registered with the dispatcher in
+`src/rvw/commands.py`, reachable through `bin/rvwctl` and bound in
+`hammerspoon/rvw_hotkeys.lua`. Screen capture belongs in its own helper, the
+way audio capture does, so that its permissions and failures stay isolated.
+
+Agreed hotkey scheme:
+
+  alt-cmd-R        capture and transcribe (TOGGLE_CAPTURE)          exists
+  ctrl-alt-cmd-R   capture, transcribe and analyse continuously     exists
+  alt-cmd-E        explain the last 60 seconds                      exists
+  alt-cmd-C        clarify the last 30 to 60 seconds                new
+  alt-cmd-S        screenshot, save only                            new
+  ctrl-alt-cmd-S   screenshot, save and interpret                   new, lower priority
 
 ## Multiple hotkeys
 
@@ -179,6 +261,12 @@ On hotkey:
 * avoid visible UI if possible.
 
 The purpose is archival memory of what was on screen during the discussion.
+
+Restrict the capture to the frontmost application's window if ScreenCaptureKit
+makes that straightforward; a whole-display capture is an acceptable first
+implementation if it does not. Save the image with a timestamp that can later
+be aligned with transcript timestamps, and record which application and window
+it came from — that metadata is nearly free now and expensive to reconstruct.
 
 ### Screenshot — SAVE + INTERPRET
 
@@ -385,6 +473,11 @@ Do not introduce distributed-systems complexity prematurely.
 ---
 
 # PHASE 8 — Automatic hardware/model selection
+
+Partly forced early: Phase 1 showed that the model choice decides whether the
+assistant is usable at all, so the per-machine model choice must be settled as
+soon as each machine runs the assistant, even though the automatic detection
+and the benchmarking below can still wait.
 
 Once the functionality is mature:
 
