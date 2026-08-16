@@ -18,6 +18,7 @@ from .segmenter import SpeechSegmenter
 log = logging.getLogger(__name__)
 
 bytes_per_sample = 4
+start_up_grace_seconds = 0.6
 
 
 class CaptureStream:
@@ -28,6 +29,7 @@ class CaptureStream:
         self._stream_name = stream_name
         self._on_segment = on_segment
         self._process = None
+        self._started_at = 0.0
         self._threads = []
         self._stopping = threading.Event()
 
@@ -46,12 +48,25 @@ class CaptureStream:
             raise RuntimeError("missing capture helper %s; run helper/build.sh"
                                % config.capture_helper_path)
         self._stopping.clear()
+        self._started_at = time.time()
         self._process = subprocess.Popen(
             [str(config.capture_helper_path), "--source", self._stream_name],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
         self._threads = [self._spawn(self._read_audio, "rvw-audio-" + self._stream_name),
                          self._spawn(self._relay_helper_log, "rvw-log-" + self._stream_name)]
+        self._require_helper_survived_start_up()
         return True
+
+    def _require_helper_survived_start_up(self):
+        """A helper denied its permission exits at once; never report that as success."""
+        try:
+            self._process.wait(timeout=start_up_grace_seconds)
+        except subprocess.TimeoutExpired:
+            return
+        self._stopping.set()                   # the reason is already in the relayed log
+        raise RuntimeError("the %s capture helper exited immediately with status %d; "
+                           "see the session log for the reason"
+                           % (self._stream_name, self._process.returncode))
 
     def stop(self):
         if not self.is_running:
@@ -91,8 +106,10 @@ class CaptureStream:
             self._on_segment(self._stream_name, segment)
 
     def _report_unexpected_exit(self):
-        if not self._stopping.is_set():
-            log.error("FAIL the %s capture helper exited unexpectedly", self._stream_name)
+        """A death during start-up is already reported, with its exit status, by start()."""
+        if self._stopping.is_set() or time.time() - self._started_at < start_up_grace_seconds:
+            return
+        log.error("FAIL the %s capture helper exited unexpectedly", self._stream_name)
 
     def _relay_helper_log(self):
         for raw_line in self._process.stderr:

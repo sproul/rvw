@@ -54,8 +54,15 @@ class Assistant:
         self._control.start()
         self._print_ready_banner()
         if start_capture_immediately:
-            self._start_streams(self._requested_stream_names([]))
+            self._start_capture_at_start_up()
         self._wait_for_quit()
+
+    def _start_capture_at_start_up(self):
+        """A stream that cannot start must not take the whole assistant down with it."""
+        try:
+            log.info("OK  %s", self._start_streams(self._requested_stream_names([])))
+        except RuntimeError as error:
+            log.error("FAIL %s; fix it and press the capture hotkey", error)
 
     def _wait_for_quit(self):
         while not self._quit_requested.wait(timeout=1.0):
@@ -72,11 +79,23 @@ class Assistant:
 
     def _report_llm_status(self):
         try:
-            log.info("OK  local LLM at %s serving %s", config.llm_base_url,
-                     ", ".join(self._llm.available_models()) or "no loaded model")
+            served = self._llm.available_models()
         except LocalLlmError as error:
             log.error("FAIL %s; run util/init_local_models.sh before asking for explanations",
                       error)
+            return
+        log.info("OK  local LLM at %s serving %s", config.llm_base_url,
+                 ", ".join(served) or "no loaded model")
+        self._warn_if_the_configured_model_is_missing(served)
+
+    @staticmethod
+    def _warn_if_the_configured_model_is_missing(served_models):
+        """Better to hear about it now than when the hotkey is pressed mid-conversation."""
+        if config.llm_model in served_models:
+            return
+        log.error("FAIL %s is not loaded; load it with 'lms load <model> --identifier %s', "
+                  "or point RVW_LLM_MODEL at one of: %s",
+                  config.llm_model, config.llm_model, ", ".join(served_models) or "nothing")
 
     def _print_ready_banner(self):
         log.info("OK  ready. Hotkeys: alt-cmd-R capture, ctrl-alt-cmd-R capture and analyse, "

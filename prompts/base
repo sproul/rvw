@@ -82,7 +82,16 @@ What was learned, and what it changes:
    permission, and Phase 7 can redirect the same client at the companion Mac.
    Keep new actions as dispatcher commands, never as inline hotkey logic.
 7. Permissions are granted to the application that launches the helper, not to
-   the helper. Running from a different terminal or IDE means granting again.
+   the helper. Running from a different terminal or IDE means granting again,
+   and once a grant has been denied macOS stops prompting: the fix is System
+   Settings, Privacy and Security, or `tccutil reset Microphone <bundle-id>`.
+   As of this writing the microphone stream is still unverified end to end for
+   exactly this reason; system audio is verified.
+8. Anything that can fail must fail where the user is looking. A capture helper
+   that dies at start-up is now reported as FAIL by the command that started it
+   rather than answering OK, and a missing LLM model is reported at start-up
+   rather than when the hotkey is pressed mid-conversation. Keep that habit:
+   commands report the truth about the state they leave behind.
 
 Known rough edges: continuous analysis is a plain timer re-running EXPLAIN;
 Whisper checks Hugging Face for the model revision at start-up unless

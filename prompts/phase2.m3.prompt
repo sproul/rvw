@@ -47,9 +47,18 @@ First thing to run when the downloads finish:
     bin/rvwctl EXPLAIN 60                   (in another, after some speech)
 
 `bin/audio_capture` must be built on this machine; it is not in git. Both the
-microphone and the system audio tap will prompt for permission the first time,
-and the grant goes to the application that launches the helper, so launch it
-from the terminal you intend to use.
+microphone and the system audio tap need permission, and the grant goes to the
+application that launches the helper, not to the helper, so launch it from the
+terminal you intend to use. On the M4 the microphone was denied to the terminal
+and macOS then stopped prompting, so the microphone path is still unverified
+end to end; system audio is verified. If the helper reports denial here, fix it
+in System Settings, Privacy and Security, or with
+`tccutil reset Microphone <bundle-id>`, and verify the microphone stream early:
+it is the one Phase 1 deliverable that has never actually run.
+
+The same applies to the LLM identifier. `bin/rvw` now reports at start-up if the
+configured model is not among the models the server lists; `util/init_local_models.sh`
+loads it as `meeting-assistant`, and `RVW_LLM_MODEL` overrides the name.
 
 
 ## Scope for this session

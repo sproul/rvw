@@ -79,8 +79,11 @@ enable_thinking=false is ignored by this model in LM Studio.
 
 Rough edges
 -----------
-- Microphone capture needs the Microphone permission for whichever application
-  launches the helper; the helper now fails loudly instead of recording silence.
+- The microphone stream is still unverified end to end. The permission is denied
+  to the terminal that launches the helper and macOS no longer prompts, so the
+  helper correctly refuses to run. Fix it in System Settings, Privacy and
+  Security, or with tccutil reset Microphone, then toggle capture again.
+  System audio is verified.
 - The system audio tap needs the audio recording permission on first use.
 - Continuous analysis is a plain timer that re-runs EXPLAIN; with the current
   model on this machine it cannot keep up.
