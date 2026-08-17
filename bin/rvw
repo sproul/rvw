@@ -10,6 +10,11 @@ venv_python=$repo_dir/.venv/bin/python
 [[ -x $venv_python ]] || { echo "FAIL missing $venv_python; run util/init_local_models.sh first" >&2; exit 1; }
 [[ -x $script_dir/audio_capture ]] || { echo "FAIL missing $script_dir/audio_capture; run helper/build.sh" >&2; exit 1; }
 
+# DYLD_LIBRARY_PATH must be set before python starts so pyannote/torchcodec can dlopen ffmpeg's libraries.
+source "$repo_dir/util/ffmpeg_env.sh"
+add_ffmpeg_libs_to_dyld_path ||
+    echo "FAIL ffmpeg not found; speaker diarization will not work (run util/init_local_models.sh)" >&2
+
 PYTHONPATH=$repo_dir/src exec "$venv_python" -m rvw.assistant "$@"
 
 exit

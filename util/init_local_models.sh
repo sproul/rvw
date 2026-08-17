@@ -12,6 +12,7 @@ set -o pipefail
 
 script_dir=$(cd "$(dirname "$BASH_SOURCE")" && pwd)
 repo_dir=$(cd "$script_dir/.." && pwd)
+source "$script_dir/ffmpeg_env.sh"                     # add_ffmpeg_libs_to_dyld_path, shared with bin/rvw
 venv_dir=$repo_dir/.venv
 venv_python=$venv_dir/bin/python
 python_request=cpython-3.12-macos-aarch64-none          # spelled out so an x86_64 build is never selected
@@ -31,6 +32,7 @@ lms_bin_dir=$HOME/.lmstudio/bin
 
 dry_mode=0                                              # set by -dry; suppresses every mutating command
 yes_mode=0                                              # set by -y/-yes; approves installs without prompting (like "yum -y")
+ffmpeg_ready=0                                          # set once ensure_ffmpeg has installed ffmpeg and exposed its libs
 
 log_ok()   { echo "OK   $*"; }
 log_fail() { echo "FAIL $*" >&2; }
@@ -98,6 +100,22 @@ install_ffmpeg_if_missing() {
     [[ $yes_mode -eq 1 ]] && brew_env=(env NONINTERACTIVE=1)
     run_cmd "${brew_env[@]}" brew install ffmpeg || die "could not install ffmpeg"
     log_ok "installed ffmpeg"
+}
+
+# Expose ffmpeg's libraries for torchcodec (see util/ffmpeg_env.sh) and report where they were found.
+export_ffmpeg_library_path() {
+    [[ $dry_mode -eq 1 ]] && return 0
+    add_ffmpeg_libs_to_dyld_path || die "could not locate ffmpeg's library directory"
+    log_ok "ffmpeg libraries on DYLD_LIBRARY_PATH: $ffmpeg_lib_dir"
+}
+
+# Call this before anything that decodes audio through ffmpeg. It installs ffmpeg on first use and
+# exposes its libraries; the guard makes repeated calls cheap so every ffmpeg-dependent step can gate on it.
+ensure_ffmpeg() {
+    [[ $ffmpeg_ready -eq 1 ]] && return 0
+    install_ffmpeg_if_missing
+    export_ffmpeg_library_path
+    ffmpeg_ready=1
 }
 
 # llmster is the GUI-less LM Studio service; its CLI is 'lms'.
@@ -238,6 +256,7 @@ make_speech_test_clip() {
 }
 
 verify_speech_models() {
+    ensure_ffmpeg
     [[ $dry_mode -eq 1 ]] && return 0
     local clip=$repo_dir/.speech_selftest.wav
     make_speech_test_clip "$clip"
@@ -277,7 +296,6 @@ SUMMARY
 
 main() {
     check_preconditions
-    install_ffmpeg_if_missing
     install_llmster_if_missing
     start_llmster_daemon
     download_llm_model
