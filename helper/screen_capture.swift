@@ -121,10 +121,19 @@ func main_display(in content: SCShareableContent) -> SCDisplay {
 
 // MARK: - capture
 
+/// A command line tool is born without a window server connection, and
+/// ScreenCaptureKit does not open one for us: building an SCContentFilter
+/// aborts the process with "Assertion failed: (did_initialize),
+/// CGS_REQUIRE_INIT" until CoreGraphics has connected. Any CoreGraphics call
+/// does the connecting, and asking for the main display is the cheapest one
+/// that cannot fail.
+func connect_to_the_window_server() {
+    _ = CGMainDisplayID()
+}
+
 /// The filter knows its own content rectangle and its display's point to pixel
-/// scale, so the native pixel size needs no AppKit: a command line tool has no
-/// window server connection and asking NSScreen for a scale factor aborts the
-/// process with CGS_REQUIRE_INIT.
+/// scale, so the native pixel size needs no AppKit: asking NSScreen for a scale
+/// factor from a command line tool aborts the process the same way.
 func pixel_size(of filter: SCContentFilter) -> (width: Int, height: Int) {
     let scale = CGFloat(filter.pointPixelScale)
     return (max(1, Int(filter.contentRect.width * scale)),
@@ -204,6 +213,7 @@ func print_metadata(_ metadata: [String: Any]) {
 struct ScreenCaptureTool {
     static func main() async {
         let request = parse_arguments()
+        connect_to_the_window_server()
         let content = await shareable_content()
         let capture = request.target == "frontmost"
             ? await capture_frontmost_window(content)

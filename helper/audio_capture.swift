@@ -117,20 +117,41 @@ final class MicrophoneCapture {
 
     /// Without this check a denied microphone simply delivers silence for ever.
     private func require_microphone_permission() {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        switch status {
         case .authorized:
             return
         case .notDetermined:
-            let waiter = DispatchSemaphore(value: 0)
-            var granted = false
-            AVCaptureDevice.requestAccess(for: .audio) { granted = $0; waiter.signal() }
-            waiter.wait()
-            if granted { return }
+            if ask_for_microphone_access() { return }
+            die("the microphone permission prompt was answered with Don't Allow")
         default:
-            break
+            die("microphone access is \(name_of(status)); grant it to the application running "
+                + "this helper in System Settings, Privacy and Security, Microphone, or run "
+                + "util/init_permissions.sh -reset to be asked again")
         }
-        die("microphone access is denied; grant it to the application running this helper "
-            + "in System Settings, Privacy and Security, Microphone")
+    }
+
+    /// macOS raises the prompt in the application this helper was launched from
+    /// and answers on another thread, so this blocks until the user has decided.
+    /// There is no timeout: whoever started the helper decides how long to wait.
+    private func ask_for_microphone_access() -> Bool {
+        let waiter = DispatchSemaphore(value: 0)
+        var granted = false
+        AVCaptureDevice.requestAccess(for: .audio) { granted = $0; waiter.signal() }
+        waiter.wait()
+        return granted
+    }
+
+    /// Naming the status keeps a refusal macOS will never ask about again apart
+    /// from a restriction no amount of clicking in System Settings can lift.
+    private func name_of(_ status: AVAuthorizationStatus) -> String {
+        switch status {
+        case .authorized:    return "authorized"
+        case .denied:        return "denied"
+        case .notDetermined: return "not determined"
+        case .restricted:    return "restricted by a policy on this Mac"
+        @unknown default:    return "reported by macOS as \(status.rawValue)"
+        }
     }
 
     func start() {
