@@ -17,13 +17,22 @@ venv_dir=$repo_dir/.venv
 venv_python=$venv_dir/bin/python
 python_request=cpython-3.12-macos-aarch64-none          # spelled out so an x86_64 build is never selected
 
-llm_model=mlx-community/Qwen3.6-35B-A3B-4bit    # override with the first positional argument
+# The daemon loads the LLM on demand and has to agree with this script about
+# which model, under which identifier and with which limits, so src/rvw/config.py
+# is the one place any of it is written down.
+read_assistant_setting() {
+    PYTHONPATH=$repo_dir/src python3 -c \
+        'import sys; from rvw import config; print(getattr(config, sys.argv[1]))' "$1" ||
+        die "cannot read $1 from src/rvw/config.py"
+}
+
+llm_model=$(read_assistant_setting llm_source_model)    # override with the first positional argument
 whisper_model=mlx-community/whisper-large-v3-turbo
 diarization_model=pyannote/speaker-diarization-community-1
 
-llm_identifier=meeting-assistant
-llm_context_length=32768
-llm_idle_ttl_seconds=3600
+llm_identifier=$(read_assistant_setting llm_model)
+llm_context_length=$(read_assistant_setting llm_context_length)
+llm_idle_ttl_seconds=$(read_assistant_setting llm_idle_ttl_seconds)
 llm_server_port=1234
 llm_server_url=http://127.0.0.1:$llm_server_port/v1
 
@@ -146,24 +155,13 @@ download_llm_model() {
     log_ok "downloaded $llm_model"
 }
 
-# 'lms load' wants the local model key, which is not identical to the Hugging Face repo id.
+# 'lms load' wants the local model key, which is not identical to the Hugging Face
+# repo id. The daemon has to resolve the same key when it loads the model on
+# demand, so both ask src/rvw/model_loader.py rather than each matching its own way.
 resolve_llm_model_key() {
-    lms ls --llm --json 2>/dev/null | python3 -c '
-import json, re, sys
-
-def normalize(text):
-    return re.sub(r"[^a-z0-9]", "", text.lower())
-
-listing = sys.stdin.read().strip()
-if not listing:
-    sys.exit(0)
-wanted = normalize(sys.argv[1].split("/")[-1])
-for model in json.loads(listing):
-    key = model.get("modelKey", "")
-    if wanted in normalize(key) or wanted in normalize(model.get("path", "")):
-        print(key)
-        break
-' "$llm_model"
+    lms ls --llm --json 2>/dev/null | PYTHONPATH=$repo_dir/src python3 -c \
+        'import sys; from rvw import model_loader; print(model_loader.resolve_model_key(sys.stdin.read(), sys.argv[1]))' \
+        "$llm_model" 2>/dev/null
 }
 
 report_llm_memory_estimate() {

@@ -9,7 +9,7 @@ import logging
 import urllib.error
 import urllib.request
 
-from . import config
+from . import config, model_loader
 
 log = logging.getLogger(__name__)
 
@@ -21,9 +21,14 @@ class LocalLlmError(RuntimeError):
 class LocalLlm:
     """Streaming chat client for the local OpenAI compatible server."""
 
-    def __init__(self, base_url=config.llm_base_url, model=config.llm_model):
+    def __init__(self, base_url=config.llm_base_url, model=config.llm_model,
+                 loads_on_demand=True):
         self._base_url = base_url.rstrip("/")
         self._model = model
+        # Only the assistant's own model is loaded on demand. The vision model
+        # is a different model under a different identifier, and guessing which
+        # one to load for it would be worse than saying it is not there.
+        self._loads_on_demand = loads_on_demand
 
     def available_models(self):
         try:
@@ -39,6 +44,7 @@ class LocalLlm:
         reported through on_reasoning, so a reasoning model does not spray its
         scratch work over the explanation.
         """
+        self._load_the_model_if_it_has_been_unloaded()
         request = self._build_request(messages)
         answer, reasoning = [], []
         with urllib.request.urlopen(request, timeout=config.llm_request_timeout_seconds) as response:
@@ -51,6 +57,17 @@ class LocalLlm:
             log.info("OK  the model answered from its reasoning channel only")
             return "".join(reasoning).strip()
         return "".join(answer).strip()
+
+    def _load_the_model_if_it_has_been_unloaded(self):
+        """LM Studio unloads an idle model on purpose, so the first question
+        after a quiet hour has to wait for it to come back."""
+        if not self._loads_on_demand:
+            return
+        try:
+            model_loader.ensure_the_configured_model_is_loaded(self.available_models())
+        except model_loader.ModelLoadError as error:
+            raise LocalLlmError("%s is not loaded and could not be loaded (%s)"
+                                % (self._model, error))
 
     def _build_request(self, messages):
         payload = {"model": self._model, "messages": messages, "stream": True,

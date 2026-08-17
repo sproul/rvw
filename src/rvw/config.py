@@ -57,6 +57,34 @@ llm_temperature = 0.3
 llm_request_timeout_seconds = 300.0
 vision_llm_model = os.environ.get("RVW_VLM_MODEL", "meeting-vision")
 
+# Qwen3.6 does think far longer than these questions deserve: measured at
+# temperature 0, "what is a unit test" costs 489 reasoning tokens and twelve
+# seconds to produce a twenty token answer. There is nothing here to turn that
+# down with. This LM Studio build ignores every request level control, measured
+# identical to the token across reasoning_effort low and high, reasoning.effort,
+# chat_template_kwargs enable_thinking, thinking and reasoning_effort, on both
+# /v1 and /api/v0, and 'lms load' has no reasoning option either. The model's
+# own chat_template.jinja does honour enable_thinking=false, so the switch
+# exists and only the MLX engine's plumbing is missing; if a later build starts
+# forwarding chat_template_kwargs, that is the one to send. Until then the
+# thinking is only a latency cost, because llm.py keeps reasoning tokens out of
+# the answer, and a per model reasoning setting in the LM Studio UI would be
+# applied at load time rather than from here.
+
+# Loading the LLM on demand. llm_model above is the identifier LM Studio serves
+# the model under; llm_source_model is the model loaded under that identifier.
+# LM Studio unloads it again once it has been idle for llm_idle_ttl_seconds,
+# which is deliberate: the assistant spends most of its life listening rather
+# than asking, and a resident twenty gigabyte model is a poor way to spend that
+# time. An unloaded model is therefore ordinary and not a fault.
+llm_source_model = os.environ.get("RVW_LLM_SOURCE_MODEL", "mlx-community/Qwen3.6-35B-A3B-4bit")
+llm_context_length = 32768
+llm_idle_ttl_seconds = 3600
+llm_load_timeout_seconds = 900.0        # loading 20 GB from a cold page cache is not quick
+
+# Started through rvw.app the daemon inherits no shell PATH, so lms is absolute.
+lms_command = Path.home() / ".lmstudio" / "bin" / "lms"
+
 # Screen capture. "frontmost" captures the frontmost application window only;
 # "display" captures the whole display and is therefore never chosen silently.
 screenshot_target = os.environ.get("RVW_SCREENSHOT_TARGET", "frontmost")

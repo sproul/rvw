@@ -35,7 +35,7 @@ class Assistant:
         self._streams = {name: CaptureStream(name, self._recognizer.submit)
                          for name in stream_names}
         self._llm = LocalLlm()
-        self._vision_llm = LocalLlm(model=config.vision_llm_model)
+        self._vision_llm = LocalLlm(model=config.vision_llm_model, loads_on_demand=False)
         self._dispatcher = self._build_dispatcher()
         self._control = ControlSocketServer(self._dispatcher)
         self._answering = threading.Lock()
@@ -88,17 +88,19 @@ class Assistant:
             return
         log.info("OK  local LLM at %s serving %s", config.llm_base_url,
                  ", ".join(served) or "no loaded model")
-        self._warn_if_the_configured_model_is_missing(served)
+        self._note_whether_the_configured_model_is_loaded(served)
         self._note_whether_the_vision_model_is_loaded(served)
 
     @staticmethod
-    def _warn_if_the_configured_model_is_missing(served_models):
-        """Better to hear about it now than when the hotkey is pressed mid-conversation."""
+    def _note_whether_the_configured_model_is_loaded(served_models):
+        """LM Studio unloads the model after an idle hour by design, so between
+        questions an absent model is the ordinary state and not worth anybody's
+        attention: the next question loads it again."""
         if config.llm_model in served_models:
+            log.info("OK  %s is loaded and ready to answer", config.llm_model)
             return
-        log.error("FAIL %s is not loaded; load it with 'lms load <model> --identifier %s', "
-                  "or point RVW_LLM_MODEL at one of: %s",
-                  config.llm_model, config.llm_model, ", ".join(served_models) or "nothing")
+        log.info("INFO %s is not loaded; it will be loaded when it is first needed, which "
+                 "makes that one question slow", config.llm_model)
 
     @staticmethod
     def _note_whether_the_vision_model_is_loaded(served_models):
@@ -107,7 +109,7 @@ class Assistant:
             log.info("OK  vision model %s is loaded, so screenshots can be interpreted",
                      config.vision_llm_model)
             return
-        log.info("OK  no vision model %s is loaded; alt-cmd-S still archives screenshots, "
+        log.info("INFO no vision model %s is loaded; alt-cmd-S still archives screenshots, "
                  "ctrl-alt-cmd-S will report the missing model",
                  config.vision_llm_model)
 

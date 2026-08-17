@@ -1,23 +1,87 @@
 #!/bin/bash
-# Start the local listening assistant in this terminal.
+# Start the local listening assistant.
+#
+# By default the daemon is started inside bin/rvw.app. macOS attributes the
+# microphone, system audio and screen recording to the application responsible
+# for the process that asks, so running the daemon in a terminal made those
+# permissions belong to that terminal: every terminal, editor and IDE needed its
+# own grant, and Emacs.app could never be granted the microphone at all. Inside
+# the bundle the assistant is responsible for itself, so it carries the same
+# permissions whoever starts it, and this command works identically from a
+# terminal, from Emacs and from a hotkey.
+#
+# Pass -here, as the first argument, to run the daemon in this terminal instead.
+# That is the right thing while debugging, because the output comes back here,
+# but it borrows the permissions of whatever application is running this shell.
 
 set -o pipefail
 
 script_dir=$(cd "$(dirname "$BASH_SOURCE")" && pwd)
 repo_dir=$(cd "$script_dir/.." && pwd)
 venv_python=$repo_dir/.venv/bin/python
+app_bundle=$script_dir/rvw.app
+launcher_log=$repo_dir/var/log/rvw.launcher.log
 
-[[ -x $venv_python ]] || { echo "FAIL missing $venv_python; run util/init_local_models.sh first" >&2; exit 1; }
-[[ -x $script_dir/audio_capture ]] || { echo "FAIL missing $script_dir/audio_capture; run helper/build.sh" >&2; exit 1; }
+daemon_start_attempts=50                # of a fifth of a second each
+
+log_ok() { echo "OK   $*"; }
+die()    { echo "FAIL $*" >&2; exit 1; }
+
+require_the_assistant_is_installed() {
+    [[ -x $venv_python ]] || die "missing $venv_python; run util/init_local_models.sh first"
+    [[ -x $script_dir/audio_capture ]] || die "missing $script_dir/audio_capture; run helper/build.sh"
+}
 
 # DYLD_LIBRARY_PATH must be set before python starts so pyannote/torchcodec can dlopen ffmpeg's libraries.
-source "$repo_dir/util/ffmpeg_env.sh"
-add_ffmpeg_libs_to_dyld_path ||
-    echo "FAIL ffmpeg not found; speaker diarization will not work (run util/init_local_models.sh)" >&2
+expose_ffmpeg_to_the_dynamic_linker() {
+    source "$repo_dir/util/ffmpeg_env.sh"
+    add_ffmpeg_libs_to_dyld_path ||
+        echo "FAIL ffmpeg not found; speaker diarization will not work (run util/init_local_models.sh)" >&2
+}
 
-PYTHONPATH=$repo_dir/src exec "$venv_python" -m rvw.assistant "$@"
+run_in_this_terminal() {
+    require_the_assistant_is_installed
+    expose_ffmpeg_to_the_dynamic_linker
+    PYTHONPATH=$repo_dir/src exec "$venv_python" -m rvw.assistant "$@"
+}
+
+# LaunchServices, not a plain fork, is what makes the bundle responsible for the
+# daemon; started any other way the permissions would go back to this shell.
+start_inside_the_app_bundle() {
+    require_the_assistant_is_installed
+    "$repo_dir/helper/build_app.sh" >/dev/null || die "cannot build $app_bundle"
+    mkdir -p "$(dirname "$launcher_log")" || die "cannot create $(dirname "$launcher_log")"
+    : > "$launcher_log"
+    open -n -a "$app_bundle" --args "$@" || die "cannot start $app_bundle"
+    report_the_daemon_started
+}
+
+# The launcher writes the pid into its log as soon as the daemon has one, which
+# is also how a daemon that dies on startup is noticed rather than assumed well.
+report_the_daemon_started() {
+    local attempt=0 line
+    while (( attempt < daemon_start_attempts )); do
+        line=$(grep -m1 'started rvw as pid' "$launcher_log" 2>/dev/null)
+        if [[ -n $line ]]; then
+            log_ok "started the assistant as rvw.app (pid ${line##* })"
+            log_ok "output is going to $launcher_log"
+            return 0
+        fi
+        sleep 0.2
+        attempt=$((attempt + 1))
+    done
+    die "rvw.app did not report a running daemon; look in $launcher_log"
+}
+
+if [[ $1 == -here ]]; then
+    shift
+    run_in_this_terminal "$@"
+fi
+
+start_inside_the_app_bundle "$@"
 
 exit
 $dp/git/rvw/bin/rvw
 $dp/git/rvw/bin/rvw --listen --debug
 $dp/git/rvw/bin/rvw --source system
+$dp/git/rvw/bin/rvw -here --debug                # in this terminal, on this terminal's permissions

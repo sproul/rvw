@@ -1,10 +1,16 @@
 #!/bin/bash
-# Build the capture helpers: bin/audio_capture and bin/screen_capture.
+# Build the capture helpers, bin/audio_capture and bin/screen_capture, and the
+# application bundle that owns their permissions, bin/rvw.app.
 #
 # The usage descriptions must be inside the binary itself: macOS refuses to let a
 # command line tool record the microphone, tap system audio or capture the screen
-# unless it can show the user a reason, and an ad hoc signature gives the tool a
-# stable identity so the permission grant survives rebuilds.
+# unless it can show the user a reason.
+#
+# Rebuilding the helpers is free. macOS grants the permissions to the
+# application responsible for them, which is always rvw.app, and never looks at
+# the helpers' own signatures. helper/build_app.sh is what has to be careful:
+# re-signing the bundle is what would cost the grants, so it only rebuilds when
+# its own sources have changed.
 
 set -o pipefail
 
@@ -37,6 +43,8 @@ mkdir -p "$repo_dir/bin" || die "cannot create $repo_dir/bin"
 
 build_helper audio_capture AVFoundation CoreAudio
 build_helper screen_capture AppKit ScreenCaptureKit ImageIO
+
+"$script_dir/build_app.sh" || die "building bin/rvw.app failed"
 
 exit
 $dp/git/rvw/helper/build.sh

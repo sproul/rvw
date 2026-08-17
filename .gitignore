@@ -4,4 +4,5 @@ __pycache__/
 *.pyc
 bin/audio_capture
 bin/screen_capture
+bin/rvw.app/
 var/

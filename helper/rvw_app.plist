@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>ai.rvw.assistant</string>
+    <key>CFBundleName</key>
+    <string>rvw</string>
+    <key>CFBundleDisplayName</key>
+    <string>rvw listening assistant</string>
+    <key>CFBundleExecutable</key>
+    <string>rvw_launcher</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <!-- An agent, not an application: no dock icon and no menu bar, but still
+         able to show the permission prompts, which a background only process
+         cannot. -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.4</string>
+    <!-- macOS shows these when it asks, and refuses to ask without them. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>The listening assistant transcribes the microphone locally so it can explain what was just said.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>The listening assistant transcribes audio played by this Mac locally so it can explain what was just said.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>The listening assistant saves a timestamped screenshot locally so that what was on screen during a discussion can be recalled later.</string>
+</dict>
+</plist>

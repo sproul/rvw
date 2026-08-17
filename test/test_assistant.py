@@ -14,6 +14,7 @@ from pathlib import Path
 
 from rvw import config
 from rvw.assistant import Assistant
+from rvw.llm import LocalLlmError
 from rvw.transcript import TranscriptSegment
 
 expected_commands = ["CLARIFY", "EXPLAIN", "INTERPRET_SCREEN", "QUIT", "SCREENSHOT",
@@ -38,6 +39,8 @@ class RecordingLlm:
 
     def __init__(self):
         self.requests = []
+        self.served_models = [config.llm_model]
+        self.raise_on_available_models = False
 
     def stream_chat(self, messages, on_token, on_reasoning=None):
         self.requests.append(messages)
@@ -45,7 +48,9 @@ class RecordingLlm:
         return "stub answer"
 
     def available_models(self):
-        return [config.llm_model]
+        if self.raise_on_available_models:
+            raise LocalLlmError("no local LLM at %s (refused)" % config.llm_base_url)
+        return self.served_models
 
 
 class AssistantCommandTestCase(unittest.TestCase):
@@ -93,6 +98,34 @@ class RegisteredCommandsTest(AssistantCommandTestCase):
 
     def test_every_phase_2_command_is_registered(self):
         self.assertEqual(expected_commands, self.assistant._dispatcher.command_names())
+
+
+class LlmStatusReportTest(AssistantCommandTestCase):
+    """LM Studio unloads the model once it has been idle for an hour, so an
+    unloaded model is the ordinary state between questions. Reporting that as a
+    failure spends the reader's attention on something already working."""
+
+    def report_llm_status_with(self, served_models):
+        self.llm.served_models = served_models
+        with self.assertLogs("rvw.assistant", level="DEBUG") as captured:
+            self.assistant._report_llm_status()
+        return captured
+
+    def test_an_unloaded_model_is_reported_as_news_not_as_a_failure(self):
+        captured = self.report_llm_status_with([])
+        self.assertNotIn("ERROR", [record.levelname for record in captured.records])
+        self.assertTrue(any("loaded when it is first needed" in record.getMessage()
+                            for record in captured.records), captured.output)
+
+    def test_a_loaded_model_is_still_reported_as_loaded(self):
+        captured = self.report_llm_status_with([config.llm_model])
+        self.assertNotIn("ERROR", [record.levelname for record in captured.records])
+
+    def test_a_server_that_is_not_running_is_still_a_failure(self):
+        self.llm.raise_on_available_models = True
+        with self.assertLogs("rvw.assistant", level="DEBUG") as captured:
+            self.assistant._report_llm_status()
+        self.assertIn("ERROR", [record.levelname for record in captured.records])
 
 
 class ClarifyCommandTest(AssistantCommandTestCase):
