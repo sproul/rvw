@@ -13,6 +13,34 @@ def segment_at(offset_seconds, text, stream="mic", duration=2.0):
                              end_epoch=start + duration, text=text)
 
 
+class TranscriptSinkTest(unittest.TestCase):
+    """Retention hangs off the one funnel every recognised utterance goes through.
+
+    The rolling transcript knows nothing about files: it offers each utterance it
+    accepted to a sink, and whether anything is written is the archive's decision.
+    """
+
+    def setUp(self):
+        self.offered = []
+        self.transcript = RollingTranscript(retention_seconds=600.0,
+                                            on_segment_added=self.offered.append)
+
+    def test_every_accepted_utterance_is_offered_to_the_sink(self):
+        self.transcript.add(segment_at(10.0, "first thing"))
+        self.transcript.add(segment_at(5.0, "second thing"))
+        self.assertEqual(["first thing", "second thing"],
+                         [segment.text for segment in self.offered])
+
+    def test_a_blank_recognition_is_not_offered(self):
+        self.transcript.add(segment_at(10.0, "   "))
+        self.assertEqual([], self.offered)
+
+    def test_an_utterance_from_an_unknown_stream_is_not_offered(self):
+        with self.assertRaises(ValueError):
+            self.transcript.add(segment_at(10.0, "hello", stream="telepathy"))
+        self.assertEqual([], self.offered)
+
+
 class RollingTranscriptTest(unittest.TestCase):
 
     def setUp(self):

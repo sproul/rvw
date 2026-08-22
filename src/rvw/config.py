@@ -45,6 +45,14 @@ continuous_analysis_period_seconds = 120.0
 # Streams. "mic" is me, "system" is everything the Mac plays back.
 stream_labels = {"mic": "me", "system": "them"}
 
+# Transcript retention. Ephemeral is the default because keeping a recording of
+# somebody's conversation is a decision, and one nobody made is a decision not
+# to: in that mode the rolling window above is all that exists and it is
+# discarded as it ages. "retained" writes the transcript of the session it
+# starts in; see rvw/meeting_archive.py.
+retention_modes = ("ephemeral", "retained")
+transcript_retention_mode = os.environ.get("RVW_RETENTION", "ephemeral")
+
 # Speech recognition.
 whisper_model = os.environ.get("RVW_WHISPER_MODEL", "mlx-community/whisper-large-v3-turbo")
 whisper_language = os.environ.get("RVW_WHISPER_LANGUAGE", "en")
@@ -95,6 +103,17 @@ def require_known_stream(stream_name):
     """Reject a capture stream name that the rest of the system cannot label."""
     if stream_name not in stream_labels:
         raise ValueError("unknown capture stream %r" % (stream_name,))
+
+
+def require_known_retention_mode(mode):
+    """Reject a retention mode nobody implements, rather than guessing at it.
+
+    Guessing here would mean either keeping a conversation that was meant to be
+    ephemeral or discarding one that was meant to be kept.
+    """
+    if mode not in retention_modes:
+        raise ValueError("unknown transcript retention mode %r; known: %s"
+                         % (mode, ", ".join(retention_modes)))
 
 
 def stream_label(stream_name):

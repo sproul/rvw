@@ -18,8 +18,9 @@ from rvw.llm import LocalLlmError
 from rvw.transcript import TranscriptSegment
 
 expected_commands = ["CLARIFY", "EXPLAIN", "INTERPRET_SCREEN", "QUIT", "SCREENSHOT",
-                     "START_CAPTURE", "STATUS", "STOP_CAPTURE", "TOGGLE_CAPTURE",
-                     "TOGGLE_CONTINUOUS"]
+                     "START_CAPTURE", "START_RETAINING", "STATUS", "STOP_CAPTURE",
+                     "STOP_RETAINING", "TOGGLE_CAPTURE", "TOGGLE_CONTINUOUS",
+                     "TOGGLE_RETENTION"]
 
 stub_helper = """#!/bin/sh
 output=""
@@ -96,8 +97,79 @@ class AssistantCommandTestCase(unittest.TestCase):
 
 class RegisteredCommandsTest(AssistantCommandTestCase):
 
-    def test_every_phase_2_command_is_registered(self):
+    def test_every_command_up_to_phase_3_is_registered(self):
         self.assertEqual(expected_commands, self.assistant._dispatcher.command_names())
+
+
+class TranscriptRetentionTest(AssistantCommandTestCase):
+    """Retention is off unless this session was asked for it, and a session that
+    was never asked leaves nothing on the disk to be found later."""
+
+    def archived_files(self):
+        return sorted(path.name for path in config.archive_dir.rglob("*") if path.is_file())
+
+    def transcript_text(self):
+        return self.assistant._archive.transcript_path.read_text(encoding="utf-8")
+
+    def test_a_session_starts_ephemeral_and_says_so(self):
+        self.assertIn("ephemeral", self.dispatch("STATUS"))
+
+    def test_speech_in_an_ephemeral_session_is_never_written(self):
+        self.add_speech("this was said in confidence")
+        self.assertEqual([], self.archived_files())
+
+    def test_retaining_writes_the_speech_that_follows_it(self):
+        self.assertTrue(self.dispatch("START_RETAINING").startswith("OK "))
+        self.add_speech("the lease timeout was thirty seconds")
+        self.assertIn("lease timeout", self.transcript_text())
+
+    def test_speech_from_before_retaining_is_not_written_afterwards(self):
+        """What was said while the session was ephemeral was said in confidence,
+        so switching retention on is not retrospective."""
+        self.add_speech("said while nobody was keeping it")
+        self.dispatch("START_RETAINING")
+        self.add_speech("said afterwards")
+        transcript = self.transcript_text()
+        self.assertNotIn("nobody was keeping it", transcript)
+        self.assertIn("said afterwards", transcript)
+
+    def test_status_reports_a_retained_session_and_where_it_is_kept(self):
+        self.dispatch("START_RETAINING")
+        self.add_speech("one utterance")
+        reply = self.dispatch("STATUS")
+        self.assertIn("retained", reply)
+        self.assertIn(str(self.assistant._archive.directory), reply)
+
+    def test_stopping_leaves_what_was_written_and_keeps_nothing_new(self):
+        self.dispatch("START_RETAINING")
+        self.add_speech("kept")
+        self.dispatch("STOP_RETAINING")
+        self.add_speech("not kept")
+        transcript = self.transcript_text()
+        self.assertIn("kept", transcript)
+        self.assertNotIn("not kept", transcript)
+
+    def test_the_toggle_turns_retention_on_and_off_again(self):
+        self.dispatch("TOGGLE_RETENTION")
+        self.assertTrue(self.assistant._archive.is_retaining)
+        self.dispatch("TOGGLE_RETENTION")
+        self.assertFalse(self.assistant._archive.is_retaining)
+
+    def test_ending_a_retained_session_renders_the_markdown(self):
+        self.dispatch("START_RETAINING")
+        self.add_speech("the lease timeout was thirty seconds")
+        self.assistant._finish_the_meeting_archive()
+        self.assertIn("lease timeout",
+                      self.assistant._archive.markdown_path.read_text(encoding="utf-8"))
+
+    def test_a_screenshot_is_archived_beside_the_transcript(self):
+        """Same directory, both timestamped: that is the whole association."""
+        self.install_stub_capture_helper()
+        self.dispatch("START_RETAINING")
+        self.add_speech("look at this")
+        self.dispatch("SCREENSHOT")
+        images = sorted(config.archive_dir.rglob("*.png"))
+        self.assertEqual(self.assistant._archive.directory, images[0].parent.parent)
 
 
 class LlmStatusReportTest(AssistantCommandTestCase):

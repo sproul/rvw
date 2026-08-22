@@ -1,0 +1,115 @@
+PHASE 3 - OPTIONAL TRANSCRIPT RETENTION
+=======================================
+Written 2026-08-21 on the M3 (96 GB), implemented and verified there the same
+day. Phases 0 to 2 are unchanged by this work apart from one move, noted under
+"What moved". 165 tests pass.
+
+
+What is new
+-----------
+Two conversation states, ephemeral and retained, and three commands that switch
+between them:
+
+  START_RETAINING     begin keeping this session's transcript
+  STOP_RETAINING      stop keeping it; what is written stays written
+  TOGGLE_RETENTION    alt-cmd-T, for a hotkey that cannot know the current state
+
+STATUS reports which state the session is in and where the transcript is going.
+RVW_RETENTION=retained makes a session start out keeping its transcript;
+ephemeral is the default and writes nothing whatever.
+
+
+Archive layout
+--------------
+  var/meetings/YYYY/MM/YYYY-MM-DD_HH.MM/transcript.jsonl
+                                       /metadata.json
+                                       /transcript.md
+                                       /screenshots/YYYY-MM-DD_HH.MM.SS.mmm.png
+                                                   /YYYY-MM-DD_HH.MM.SS.mmm.json
+
+The transcript lands in the directory the screenshots of the same session were
+already going into, which is what Phase 2 left room for. That is the whole
+association between an image and the speech around it: same directory, and both
+timestamped. No index is involved and none can be lost.
+
+transcript.jsonl, one object per utterance, appended and never rewritten:
+
+  {"end_epoch": 1787376745.437, "speaker": "them", "start_epoch": 1787376741.537,
+   "start_local": "2026-08-21T22:32:21", "stream": "system",
+   "text": "The lease timeout was 30 seconds, and the client should reconnect."}
+
+The speaker label and the local time are stored even though both are derivable,
+because the value of a canonical file is that it can be read in five years
+without this repository. metadata.json holds what the transcript cannot say about
+itself: the session's start and end, the streams and their labels, the host, and
+the recognition and LLM models that produced the text. transcript.md is rendered
+from the JSONL, one utterance per paragraph, and says in its own first lines that
+it is derived and will be rewritten.
+
+
+Design decisions
+----------------
+Retention hangs off RollingTranscript.add, the one funnel every recognised
+utterance already passes through. The transcript offers each utterance it
+accepted to a sink and knows nothing else: whether anything is written is
+entirely the archive's decision, and nothing in the recognition path knows about
+files. The sink is called outside the transcript's lock, because it writes to a
+disk and the capture threads must not queue behind that.
+
+Ephemeral means nothing is written, not that something is written and deleted.
+An ephemeral session creates no directory and no file, so there is nothing to
+find, nothing to forget to delete, and nothing to explain to whoever was in the
+conversation.
+
+Switching retention on is not retrospective. The rolling window still holds up to
+half an hour of speech at that moment, and writing it would be keeping words that
+were said while the session was ephemeral. Switching retention off, conversely,
+leaves what is already written: it is a decision about what happens next, not a
+way to unsay anything. Both directions are logged.
+
+The file is opened and closed per utterance rather than held open. Utterances
+arrive every few seconds, so the cost is irrelevant, and a crash or a power cut
+then leaves a complete file rather than a partial last line.
+
+A line that cannot be read back is fatal. read_transcript_records refuses a
+transcript with a line that is not JSON or that lacks the fields every record
+has, naming the file and the line number, because a rendering silently one line
+short would be believed. That is also why transcript.md is derived and never
+read: a rendering can never disagree with the record it came from.
+
+Nothing here is a database, which principle 7 of the specification requires. An
+index over these files belongs in Phase 4 and has to be rebuildable from them.
+
+An unwritable disk stops retention rather than reporting once per utterance. It
+will not improve within the session, and one FAIL is more useful than hundreds.
+
+
+What moved
+----------
+session_archive_dir moved from rvw/screenshot.py to rvw/meeting_archive.py, with
+local_time_text beside it, and screenshot.py imports both. The meeting directory
+is no longer a screenshot concept: it holds the transcript, the metadata and the
+images, so it belongs to the module that owns the meeting. Nothing else changed
+about screen capture.
+
+
+Verified on the M3
+------------------
+- An ephemeral session, driven through the real control socket, left no file and
+  no directory behind: STATUS said "ephemeral (the transcript is not being kept)"
+  and var/meetings stayed empty.
+- A retained session wrote the JSONL, the metadata and the rendering. Real speech
+  played through the system audio tap and recognised by Whisper arrived in
+  transcript.jsonl with its timestamps, and in transcript.md with its speaker.
+- TOGGLE_RETENTION switched both ways through bin/rvwctl, and QUIT rendered the
+  Markdown on the way out.
+- A session that retained nothing still writes metadata.json and a transcript.md
+  saying no speech was recorded, which is honest rather than an empty directory.
+
+
+Still to verify
+---------------
+- The same on the M4 Air, where the permissions are all granted; nothing here is
+  machine dependent, but neither was anything else that later differed.
+- A long meeting. The longest retained session so far is minutes, and the only
+  thing that scales with length is the file itself.

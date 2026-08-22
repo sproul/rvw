@@ -17,6 +17,7 @@ from .audio_source import CaptureStream
 from .commands import CommandDispatcher
 from .control import ControlSocketServer
 from .llm import LocalLlm, LocalLlmError
+from .meeting_archive import MeetingArchive
 from .recognizer import RecognitionWorker
 from .transcript import RollingTranscript
 
@@ -29,7 +30,9 @@ class Assistant:
     """Wires the components together and implements the hotkey commands."""
 
     def __init__(self, stream_names):
-        self._transcript = RollingTranscript()
+        self._session_started_epoch = time.time()
+        self._archive = MeetingArchive(self._session_started_epoch, stream_names)
+        self._transcript = RollingTranscript(on_segment_added=self._archive.record_segment)
         self._transcriber = WhisperTranscriber()
         self._recognizer = RecognitionWorker(self._transcriber, self._transcript)
         self._streams = {name: CaptureStream(name, self._recognizer.submit)
@@ -42,7 +45,6 @@ class Assistant:
         self._continuous_analysis = threading.Event()
         self._quit_requested = threading.Event()
         self._last_continuous_analysis = 0.0
-        self._session_started_epoch = time.time()
         self._log_path = None
 
     # -- lifecycle ---------------------------------------------------------
@@ -77,7 +79,16 @@ class Assistant:
             stream.stop()
         self._recognizer.stop()
         self._control.stop()
+        self._finish_the_meeting_archive()
         log.info("OK  assistant stopped; session log is %s", self._log_path)
+
+    def _finish_the_meeting_archive(self):
+        """Close the transcript of a retained session and render it; an ephemeral
+        session has nothing to close and leaves nothing behind.
+
+        The archive reports what it did, so there is nothing to log here.
+        """
+        self._archive.stop_retaining()
 
     def _report_llm_status(self):
         try:
@@ -116,10 +127,11 @@ class Assistant:
     def _print_ready_banner(self):
         log.info("OK  ready. Hotkeys: alt-cmd-R capture, ctrl-alt-cmd-R capture and analyse, "
                  "alt-cmd-E explain the last %ds, alt-cmd-C clarify the last %ds, "
-                 "alt-cmd-S screenshot, ctrl-alt-cmd-S screenshot and interpret",
+                 "alt-cmd-S screenshot, ctrl-alt-cmd-S screenshot and interpret, "
+                 "alt-cmd-T keep or stop keeping the transcript",
                  int(config.explain_window_seconds), int(config.clarify_window_seconds))
-        log.info("OK  screenshots are archived under %s",
-                 screenshot.session_archive_dir(self._session_started_epoch))
+        log.info("OK  screenshots are archived under %s", self._archive.directory)
+        log.info("OK  transcript retention: %s", self._archive.describe_state())
 
     # -- commands ----------------------------------------------------------
 
@@ -130,10 +142,13 @@ class Assistant:
                               ("INTERPRET_SCREEN", self._command_interpret_screen),
                               ("SCREENSHOT", self._command_screenshot),
                               ("START_CAPTURE", self._command_start_capture),
+                              ("START_RETAINING", self._command_start_retaining),
                               ("STATUS", self._command_status),
                               ("STOP_CAPTURE", self._command_stop_capture),
+                              ("STOP_RETAINING", self._command_stop_retaining),
                               ("TOGGLE_CAPTURE", self._command_toggle_capture),
                               ("TOGGLE_CONTINUOUS", self._command_toggle_continuous),
+                              ("TOGGLE_RETENTION", self._command_toggle_retention),
                               ("QUIT", self._command_quit)]:
             dispatcher.register(name, handler)
         return dispatcher
@@ -159,6 +174,15 @@ class Assistant:
         self._last_continuous_analysis = time.monotonic()
         self._continuous_analysis.set()
         return "continuous analysis on, every %ds" % config.continuous_analysis_period_seconds
+
+    def _command_start_retaining(self, arguments):
+        return self._archive.start_retaining()
+
+    def _command_stop_retaining(self, arguments):
+        return self._archive.stop_retaining()
+
+    def _command_toggle_retention(self, arguments):
+        return self._archive.toggle_retention()
 
     def _command_explain(self, arguments):
         return self._start_transcript_answer(prompts.build_explain_messages, arguments,
@@ -206,10 +230,11 @@ class Assistant:
 
     def _command_status(self, arguments):
         running = [name for name, stream in self._streams.items() if stream.is_running]
-        return "capture: %s; continuous: %s; transcript segments: %d" % (
+        return "capture: %s; continuous: %s; transcript segments: %d; retention: %s" % (
             ", ".join(running) or "idle",
             "on" if self._continuous_analysis.is_set() else "off",
-            self._transcript.segment_count)
+            self._transcript.segment_count,
+            self._archive.describe_state())
 
     def _command_quit(self, arguments):
         self._quit_requested.set()

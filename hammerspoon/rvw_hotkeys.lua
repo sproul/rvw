@@ -45,5 +45,10 @@ hs.hotkey.bind(mods, "c", command_sender("CLARIFY"))
 hs.hotkey.bind(mods, "s", silent_command_sender("SCREENSHOT"))
 hs.hotkey.bind(mods_with_ctrl, "s", silent_command_sender("INTERPRET_SCREEN"))
 
+-- Retention is the one state worth an alert even while sharing a screen: whether
+-- this conversation is being kept is not something to be unsure about.
+hs.hotkey.bind(mods, "t", command_sender("TOGGLE_RETENTION"))
+
 hs.alert.show("OK rvw hotkeys: alt-cmd-R capture, ctrl-alt-cmd-R analyse, alt-cmd-E explain, "
-  .. "alt-cmd-C clarify, alt-cmd-S screenshot, ctrl-alt-cmd-S screenshot and interpret")
+  .. "alt-cmd-C clarify, alt-cmd-S screenshot, ctrl-alt-cmd-S screenshot and interpret, "
+  .. "alt-cmd-T keep or stop keeping the transcript")

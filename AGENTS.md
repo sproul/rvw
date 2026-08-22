@@ -2,7 +2,7 @@
 
 ## Layout
 - `src/rvw/` python assistant (capture supervision, segmentation, ASR, LLM, commands,
-  screenshot archiving)
+  screenshot archiving, optional transcript retention)
 - `helper/audio_capture.swift` Core Audio capture helper, built into `bin/audio_capture`
 - `helper/screen_capture.swift` ScreenCaptureKit helper, built into `bin/screen_capture`
 - `bin/rvw` daemon launcher, `bin/rvwctl` hotkey client (system python, stdlib only)
@@ -10,8 +10,10 @@
   `bin/rvw.app`, the bundle that owns the macOS permissions
 - `hammerspoon/rvw_hotkeys.lua` global hotkeys, required from `~/.hammerspoon/init.lua`
 - `doc/` phase reports and model reasoning, `prompts/` the specification
-- `var/meetings/YYYY/MM/YYYY-MM-DD_HH.MM/screenshots/` archived images and their
-  sidecar metadata; move the root with `RVW_ARCHIVE_DIR`
+- `var/meetings/YYYY/MM/YYYY-MM-DD_HH.MM/` everything one session keeps:
+  `transcript.jsonl` and `metadata.json`, `transcript.md` rendered from the JSONL, and
+  `screenshots/` with the archived images and their sidecar metadata; move the root with
+  `RVW_ARCHIVE_DIR`
 
 ## Commands
 - Set up everything: `util/init.sh` (models, the login agent, then permissions)
@@ -26,7 +28,7 @@
 - Run the tests: `util/run_tests.sh` (unittest, no pytest in the venv)
 - Run the assistant: `bin/rvw [--source mic|system|both] [--listen] [--debug]`, which starts it
   inside `bin/rvw.app`; `bin/rvw -here ...` runs it in this terminal instead
-- Send a command: `bin/rvwctl EXPLAIN|CLARIFY|SCREENSHOT|INTERPRET_SCREEN|TOGGLE_CAPTURE|TOGGLE_CONTINUOUS|STATUS|QUIT`
+- Send a command: `bin/rvwctl EXPLAIN|CLARIFY|SCREENSHOT|INTERPRET_SCREEN|TOGGLE_CAPTURE|TOGGLE_CONTINUOUS|START_RETAINING|STOP_RETAINING|TOGGLE_RETENTION|STATUS|QUIT`
 - Take one screenshot by hand: `bin/screen_capture --output /tmp/shot.png --target frontmost`
 
 ## Notes
@@ -41,6 +43,19 @@
 - The LLM loads on demand: LM Studio unloads it after `llm_idle_ttl_seconds` idle, and
   `src/rvw/model_loader.py` loads it again on the first question, which costs that one
   question about 45s. An unloaded model is ordinary and is logged INFO, not FAIL.
+- A session is ephemeral unless asked otherwise and then writes nothing at all: the rolling
+  transcript lives in memory and ages out. `TOGGLE_RETENTION` (alt-cmd-T), `START_RETAINING`
+  and `STOP_RETAINING` switch it, `STATUS` reports it, and `RVW_RETENTION=retained` makes a
+  session start out keeping its transcript.
+- Retention is not retrospective: switching it on keeps the speech from that moment, not what
+  is still sitting in the rolling window, which was said while the session was ephemeral.
+  Switching it off keeps what is already written, because that is a decision about what
+  happens next and not a way to unsay anything.
+- `transcript.jsonl` is canonical: one JSON object per utterance, appended and never
+  rewritten, each line carrying its own local time and speaker label so it can be read
+  without this repository. `transcript.md` is derived from it and rewritten from it, so it can
+  be deleted at any time; nothing reads it back. Any Phase 4 index must be rebuildable the
+  same way.
 - Log prefixes: `OK` an action succeeded, `INFO` routine news worth no one's effort,
   `FAIL` a problem needing attention. Never spend FAIL on something working as designed.
 - `util/init_local_models.sh` reads the model, identifier, context length and idle timeout

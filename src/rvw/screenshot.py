@@ -1,14 +1,15 @@
 """Archival screen capture.
 
 The image and the metadata beside it are canonical data: no OCR, no model and
-no network are involved in saving them, and the layout is the one Phase 3 will
-adopt for whole meetings,
+no network are involved in saving them, and they are archived inside the meeting
+directory that rvw/meeting_archive.py owns,
 
     <archive>/YYYY/MM/YYYY-MM-DD_HH.MM/screenshots/YYYY-MM-DD_HH.MM.SS.mmm.png
                                                   /YYYY-MM-DD_HH.MM.SS.mmm.json
 
-so that a saved image can later be aligned with transcript timestamps. Capture
-itself lives in the Swift helper, which owns the screen recording permission.
+so that a saved image sits beside the transcript of the same session and can be
+aligned with its timestamps. Capture itself lives in the Swift helper, which owns
+the screen recording permission.
 """
 
 import base64
@@ -20,12 +21,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import config
+from .meeting_archive import local_time_text, session_archive_dir
 
 log = logging.getLogger(__name__)
 
-session_directory_format = "%Y-%m-%d_%H.%M"
 image_name_format = "%Y-%m-%d_%H.%M.%S"
-local_time_format = "%Y-%m-%dT%H:%M:%S"
 
 
 @dataclass(frozen=True)
@@ -49,13 +49,6 @@ def capture_screenshot(session_started_epoch, now=None):
     log.info("OK  screenshot %s (%s)", image_path.name, _describe_source(metadata))
     return Screenshot(image_path=image_path, metadata_path=metadata_path,
                       captured_epoch=captured_epoch, metadata=metadata)
-
-
-def session_archive_dir(session_started_epoch):
-    """Directory holding everything archived from one assistant session."""
-    started = time.localtime(session_started_epoch)
-    return (config.archive_dir / time.strftime("%Y", started) / time.strftime("%m", started)
-            / time.strftime(session_directory_format, started))
 
 
 def screenshot_image_path(session_started_epoch, captured_epoch):
@@ -118,8 +111,7 @@ def _build_metadata(image_path, captured_epoch, helper_metadata):
     metadata = dict(helper_metadata)
     metadata["image"] = image_path.name
     metadata["captured_epoch"] = round(captured_epoch, 3)
-    metadata["captured_local"] = time.strftime(local_time_format,
-                                               time.localtime(captured_epoch))
+    metadata["captured_local"] = local_time_text(captured_epoch)
     metadata["bytes"] = image_path.stat().st_size
     return metadata
 

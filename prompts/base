@@ -29,15 +29,20 @@ The system should eventually choose appropriately sized local models for each ma
 9. Every phase should end in something runnable and testable.
 10. Prefer a CLI or minimal menu-bar utility over a sophisticated GUI until the core system proves useful.
 
-# CURRENT STATE — updated 2026-08-21 after verifying Phase 2 (m4)
+# CURRENT STATE — updated 2026-08-21 after verifying Phase 2 (m4) and Phase 3 (m3)
 
-Phases 0, 1 and 2 are implemented, and Phase 2 is now verified on the M4 Air
-against the real helpers and the real model: all four permissions granted, real
-screenshots archived with their metadata, real speech transcribed through the
-system audio tap, and CLARIFY and EXPLAIN both answering from it. Two bugs were
-found by that verification and fixed; they are the two entries at the end of
-"What was learned" below. See `doc/phase1` and `doc/phase2` for the design
-decisions and measurements, and `AGENTS.md` for the commands.
+Phases 0 to 3 are implemented. Phase 3, optional transcript retention, was built
+and verified on the M3 on 2026-08-21: a retained session wrote the JSONL,
+metadata and rendered Markdown, real speech from the system tap reached the
+JSONL, and an ephemeral session wrote nothing at all. See `doc/phase3`.
+
+Phase 2 is verified on the M4 Air against the real helpers and the real model:
+all four permissions granted, real screenshots archived with their metadata, real
+speech transcribed through the system audio tap, and CLARIFY and EXPLAIN both
+answering from it. Two bugs were found by that verification and fixed; they are
+the two entries at the end of "What was learned" below. See `doc/phase1`,
+`doc/phase2` and `doc/phase3` for the design decisions and measurements, and
+`AGENTS.md` for the commands.
 
 What exists in the repository:
 
@@ -56,12 +61,13 @@ What exists in the repository:
   `recognizer` (single mlx-whisper worker), `transcript` (rolling, timestamped,
   one stream per source), `llm` (streaming OpenAI-compatible client),
   `commands` (transport independent dispatcher), `control` (unix socket),
-  `prompts`, `screenshot` (archival save plus sidecar metadata), `session_log`,
-  `config`, `assistant`.
+  `prompts`, `screenshot` (archival save plus sidecar metadata),
+  `meeting_archive` (the meeting directory, and optional transcript retention),
+  `session_log`, `config`, `assistant`.
 * `bin/rvw` (daemon) and `bin/rvwctl` (hotkey client, system python, stdlib
   only). `hammerspoon/rvw_hotkeys.lua` binds the keys and is required from
   `~/.hammerspoon/init.lua`.
-* `test/` with 130 unittest tests, run by `util/run_tests.sh`.
+* `test/` with 165 unittest tests, run by `util/run_tests.sh`.
 * `util/init_local_models.sh` installs and verifies the model stack, and
   `util/init_permissions.sh` explains, probes and reports every macOS privacy
   permission (Microphone, Audio Recording, Screen Recording, Accessibility);
@@ -73,16 +79,19 @@ What exists in the repository:
 
 Commands understood today: `EXPLAIN [seconds]`, `CLARIFY [seconds]`,
 `SCREENSHOT`, `INTERPRET_SCREEN [seconds]`, `START_CAPTURE [streams]`,
-`STOP_CAPTURE`, `TOGGLE_CAPTURE`, `TOGGLE_CONTINUOUS`, `STATUS`, `QUIT`.
+`STOP_CAPTURE`, `TOGGLE_CAPTURE`, `TOGGLE_CONTINUOUS`, `START_RETAINING`,
+`STOP_RETAINING`, `TOGGLE_RETENTION`, `STATUS`, `QUIT`.
 Hotkeys today: alt-cmd-R capture, ctrl-alt-cmd-R capture and analyse,
 alt-cmd-E explain the last 60 seconds, alt-cmd-C clarify the last 45 seconds,
-alt-cmd-S screenshot, ctrl-alt-cmd-S screenshot and interpret.
+alt-cmd-S screenshot, ctrl-alt-cmd-S screenshot and interpret, alt-cmd-T keep or
+stop keeping the transcript.
 
-Archived screenshots live in
-`var/meetings/YYYY/MM/YYYY-MM-DD_HH.MM/screenshots/`, one PNG plus one sidecar
-JSON per capture, named by capture time to the millisecond; `RVW_ARCHIVE_DIR`
-moves the root. Phase 3 should put its transcripts in the same session
-directory.
+One session archives everything it keeps in
+`var/meetings/YYYY/MM/YYYY-MM-DD_HH.MM/`: `transcript.jsonl` while retention is
+on, `metadata.json` beside it, `transcript.md` rendered from the JSONL, and
+`screenshots/` holding one PNG plus one sidecar JSON per capture, named by
+capture time to the millisecond. `RVW_ARCHIVE_DIR` moves the root. A session is
+ephemeral unless asked otherwise, and an ephemeral session writes none of it.
 
 What was learned, and what it changes:
 
@@ -359,7 +368,7 @@ Do not delay SAVE ONLY while implementing image interpretation.
 
 ---
 
-# PHASE 3 — Optional transcript retention
+# PHASE 3 — Optional transcript retention (DONE and VERIFIED on m3)
 
 Add explicit conversation state:
 

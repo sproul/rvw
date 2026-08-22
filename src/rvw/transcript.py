@@ -1,7 +1,9 @@
 """Rolling in-memory transcript shared by every capture stream.
 
-Records already carry timestamps and a stable structure so that Phase 3 can
-persist them without changing the producers.
+Every recognised utterance passes through add(), which makes it the one place
+retention can hang off: an accepted utterance is offered to the on_segment_added
+sink, and whether anything is written is entirely the sink's decision. Nothing
+here knows about files.
 """
 
 import threading
@@ -27,8 +29,10 @@ def format_offset(seconds):
 class RollingTranscript:
     """Timestamped recent speech from all streams, pruned to a retention window."""
 
-    def __init__(self, retention_seconds=config.transcript_retention_seconds):
+    def __init__(self, retention_seconds=config.transcript_retention_seconds,
+                 on_segment_added=None):
         self._retention_seconds = retention_seconds
+        self._on_segment_added = on_segment_added
         self._segments = []
         self._lock = threading.Lock()
 
@@ -46,7 +50,14 @@ class RollingTranscript:
             self._segments.append(segment)
             self._segments = self._segments_ending_after(
                 segment.start_epoch - self._retention_seconds)
+        self._offer_to_the_sink(segment)
         return True
+
+    def _offer_to_the_sink(self, segment):
+        """Called outside the lock: the sink writes to a file and the capture
+        threads must not queue behind that."""
+        if self._on_segment_added is not None:
+            self._on_segment_added(segment)
 
     def _segments_ending_after(self, cutoff_epoch):
         return [segment for segment in self._segments if segment.end_epoch >= cutoff_epoch]
