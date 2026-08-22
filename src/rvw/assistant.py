@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 
-from . import config, prompts, screenshot, session_log
+from . import config, meeting_index, prompts, recall, screenshot, session_log
 from .asr import WhisperTranscriber
 from .audio_source import CaptureStream
 from .commands import CommandDispatcher
@@ -39,6 +39,8 @@ class Assistant:
                          for name in stream_names}
         self._llm = LocalLlm()
         self._vision_llm = LocalLlm(model=config.vision_llm_model, loads_on_demand=False)
+        self._meeting_index = meeting_index.MeetingIndex()
+        self._index_built = False
         self._dispatcher = self._build_dispatcher()
         self._control = ControlSocketServer(self._dispatcher)
         self._answering = threading.Lock()
@@ -140,7 +142,10 @@ class Assistant:
         for name, handler in [("CLARIFY", self._command_clarify),
                               ("EXPLAIN", self._command_explain),
                               ("INTERPRET_SCREEN", self._command_interpret_screen),
+                              ("RECALL", self._command_recall),
+                              ("REINDEX", self._command_reindex),
                               ("SCREENSHOT", self._command_screenshot),
+                              ("SEARCH", self._command_search),
                               ("START_CAPTURE", self._command_start_capture),
                               ("START_RETAINING", self._command_start_retaining),
                               ("STATUS", self._command_status),
@@ -227,6 +232,60 @@ class Assistant:
         if config.vision_llm_model in served:
             return None
         return "not interpreted: no model is loaded as '%s'" % config.vision_llm_model
+
+    # -- searchable meeting memory (Phase 4) -------------------------------
+
+    def _command_search(self, arguments):
+        """Full text search over retained conversations; hits trace back to them."""
+        hits = self._ready_meeting_index().search(self._required_query(arguments, "SEARCH"))
+        if not hits:
+            return "no retained conversation matches %r" % " ".join(arguments)
+        return "%d hit(s):\n%s" % (len(hits), "\n".join(recall.search_result_lines(hits)))
+
+    def _command_recall(self, arguments):
+        """Answer a question from a few retrieved passages, with references back."""
+        question = self._required_query(arguments, "RECALL")
+        hits = self._ready_meeting_index().search(question, config.recall_passage_count)
+        if not hits:
+            return "no retained conversation matches %r" % question
+        return self._grounded_answer_to(question, hits)
+
+    def _command_reindex(self, arguments):
+        """Rebuild the disposable index from the canonical transcripts."""
+        stats = self._meeting_index.rebuild()
+        self._index_built = True
+        return "indexed %d utterance(s) from %d meeting(s)" % (stats.utterance_count,
+                                                               stats.meeting_count)
+
+    def _grounded_answer_to(self, question, hits):
+        """Ground the model on the passages, show me the sources, stream the answer."""
+        passages = recall.numbered_passages(hits)
+        messages = prompts.build_recall_messages(question, passages)
+        self._print_recall_sources(hits)
+        return "grounded answer in the assistant terminal from %d source(s): %s" % (
+            len(hits), self._start_answer(self._llm, messages, passages, "recall"))
+
+    def _print_recall_sources(self, hits):
+        """The sources an answer's [n] references point at, in the assistant terminal."""
+        sys.stdout.write("\n----- recall sources -----\n")
+        sys.stdout.write("\n".join(recall.source_lines(hits)) + "\n")
+        sys.stdout.flush()
+
+    def _ready_meeting_index(self):
+        """Build the index once on first use; REINDEX refreshes it afterwards."""
+        if not self._index_built:
+            self._meeting_index.rebuild()
+            self._index_built = True
+        return self._meeting_index
+
+    @staticmethod
+    def _required_query(arguments, command_name):
+        query = " ".join(arguments).strip()
+        if not query:
+            raise ValueError("%s needs something to look for" % command_name)
+        return query
+
+    # -- status and shutdown -----------------------------------------------
 
     def _command_status(self, arguments):
         running = [name for name, stream in self._streams.items() if stream.is_running]

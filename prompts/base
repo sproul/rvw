@@ -29,9 +29,18 @@ The system should eventually choose appropriately sized local models for each ma
 9. Every phase should end in something runnable and testable.
 10. Prefer a CLI or minimal menu-bar utility over a sophisticated GUI until the core system proves useful.
 
-# CURRENT STATE — updated 2026-08-21 after verifying Phase 2 (m4) and Phase 3 (m3)
+# CURRENT STATE — updated 2026-08-21 after Phase 4, and verifying Phase 2 (m4) and Phase 3 (m3)
 
-Phases 0 to 3 are implemented. Phase 3, optional transcript retention, was built
+Phases 0 to 4 are implemented. Phase 4, searchable meeting memory, was built on
+2026-08-21: a SQLite FTS5 index over the retained transcripts, rebuildable from
+them and never synchronised between Macs, with SEARCH, RECALL (retrieval
+augmented, cited) and REINDEX. It was verified end to end against a synthetic
+archive -- ranked hits linking back to meeting, time and screenshots, a grounded
+and cited recall prompt, and byte-identical answers after the index was deleted
+and rebuilt -- but not yet against the real model on the real machines. See
+`doc/phase4`.
+
+Phase 3, optional transcript retention, was built
 and verified on the M3 on 2026-08-21: a retained session wrote the JSONL,
 metadata and rendered Markdown, real speech from the system tap reached the
 JSONL, and an ephemeral session wrote nothing at all. See `doc/phase3`.
@@ -63,6 +72,8 @@ What exists in the repository:
   `commands` (transport independent dispatcher), `control` (unix socket),
   `prompts`, `screenshot` (archival save plus sidecar metadata),
   `meeting_archive` (the meeting directory, and optional transcript retention),
+  `meeting_index` (the disposable FTS5 index over the transcripts), `recall`
+  (formatting retrieved passages for the model and for me),
   `session_log`, `config`, `assistant`.
 * `bin/rvw` (daemon) and `bin/rvwctl` (hotkey client, system python, stdlib
   only). `hammerspoon/rvw_hotkeys.lua` binds the keys and is required from
@@ -78,7 +89,8 @@ What exists in the repository:
   installers.
 
 Commands understood today: `EXPLAIN [seconds]`, `CLARIFY [seconds]`,
-`SCREENSHOT`, `INTERPRET_SCREEN [seconds]`, `START_CAPTURE [streams]`,
+`SCREENSHOT`, `INTERPRET_SCREEN [seconds]`, `SEARCH <words>`, `RECALL <question>`,
+`REINDEX`, `START_CAPTURE [streams]`,
 `STOP_CAPTURE`, `TOGGLE_CAPTURE`, `TOGGLE_CONTINUOUS`, `START_RETAINING`,
 `STOP_RETAINING`, `TOGGLE_RETENTION`, `STATUS`, `QUIT`.
 Hotkeys today: alt-cmd-R capture, ctrl-alt-cmd-R capture and analyse,
@@ -405,7 +417,7 @@ Do not make SQLite the canonical archive.
 
 ---
 
-# PHASE 4 — Searchable meeting memory
+# PHASE 4 — Searchable meeting memory (DONE on m4, VERIFIED against a synthetic archive)
 
 Now make retained conversations useful as long-term memory.
 

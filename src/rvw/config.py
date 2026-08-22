@@ -53,6 +53,17 @@ stream_labels = {"mic": "me", "system": "them"}
 retention_modes = ("ephemeral", "retained")
 transcript_retention_mode = os.environ.get("RVW_RETENTION", "ephemeral")
 
+# Searchable meeting memory (Phase 4). The index is derived data, rebuilt from
+# the canonical transcripts, so it lives under var/ and can be deleted at any
+# time; principle 7 forbids synchronising it between Macs, and rebuilding it
+# locally is what replaces that. RVW_INDEX_DB moves it, as RVW_ARCHIVE_DIR moves
+# the transcripts it is built from.
+index_dir = var_dir / "index"
+index_db_path = Path(os.environ.get("RVW_INDEX_DB", index_dir / "meetings.db"))
+search_result_limit = 8                 # hits SEARCH shows for one query
+recall_passage_count = 6                # passages retrieved to ground one RECALL answer
+screenshot_association_seconds = 120.0  # a screenshot captured this near a passage is "associated"
+
 # Speech recognition.
 whisper_model = os.environ.get("RVW_WHISPER_MODEL", "mlx-community/whisper-large-v3-turbo")
 whisper_language = os.environ.get("RVW_WHISPER_LANGUAGE", "en")

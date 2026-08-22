@@ -40,6 +40,20 @@ clarify_system_prompt = (
     "Do not pad the answer."
 )
 
+recall_system_prompt = (
+    "You answer a question about past conversations using only the numbered\n"
+    "transcript passages you are given, which were retrieved from my own meeting\n"
+    "archive.\n"
+    "Base the answer only on those passages. Do not use anything else you know, and\n"
+    "do not invent detail that is not in them.\n"
+    "Cite the passages you used by their number in square brackets, for example [2],\n"
+    "so the answer can be traced back to the conversation it came from.\n"
+    "The passages are machine transcriptions and may contain misrecognised words;\n"
+    "reconstruct the obvious ones and say when you have.\n"
+    "If the passages do not answer the question, say so plainly instead of guessing,\n"
+    "and do not pad the answer."
+)
+
 interpret_system_prompt = (
     "You describe a screenshot taken during a live technical conversation, for the\n"
     "person who is in that conversation.\n"
@@ -63,6 +77,19 @@ def build_clarify_messages(transcript_text, window_seconds):
     """Chat messages asking what was actually said in the recent transcript window."""
     return _build_transcript_messages(clarify_system_prompt, transcript_text, window_seconds,
                                       "Reconstruct this passage now.")
+
+
+def build_recall_messages(question, passages):
+    """Chat messages asking the model to answer a question from retrieved passages."""
+    if not question.strip():
+        raise ValueError("no question was asked")
+    if not passages.strip():
+        raise ValueError("no passages were retrieved to answer from")
+    request = ("Passages retrieved from my meeting archive:\n\n%s\n\n"
+               "Question: %s\n\nAnswer from the passages above, and cite the ones you use."
+               % (passages.strip(), question.strip()))
+    return [{"role": "system", "content": recall_system_prompt},
+            {"role": "user", "content": request}]
 
 
 def build_interpret_messages(transcript_text, image_data_uri, window_seconds):

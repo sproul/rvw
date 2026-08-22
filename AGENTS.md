@@ -14,6 +14,8 @@
   `transcript.jsonl` and `metadata.json`, `transcript.md` rendered from the JSONL, and
   `screenshots/` with the archived images and their sidecar metadata; move the root with
   `RVW_ARCHIVE_DIR`
+- `var/index/meetings.db` the SQLite FTS5 index over the transcripts, derived data rebuilt
+  from them and never synchronised between Macs; move it with `RVW_INDEX_DB`
 
 ## Commands
 - Set up everything: `util/init.sh` (models, the login agent, then permissions)
@@ -25,10 +27,13 @@
   settings pane of anything missing, `-reset` makes macOS ask again after a refusal)
 - Build both capture helpers and `bin/rvw.app`: `helper/build.sh`
 - Rebuild only the bundle: `helper/build_app.sh` (does nothing unless its own sources changed)
+- Rebuild the searchable meeting index from the transcripts: `util/rebuild_index.sh` (the same
+  rebuild as the assistant's `REINDEX`, without a running daemon)
 - Run the tests: `util/run_tests.sh` (unittest, no pytest in the venv)
 - Run the assistant: `bin/rvw [--source mic|system|both] [--listen] [--debug]`, which starts it
   inside `bin/rvw.app`; `bin/rvw -here ...` runs it in this terminal instead
-- Send a command: `bin/rvwctl EXPLAIN|CLARIFY|SCREENSHOT|INTERPRET_SCREEN|TOGGLE_CAPTURE|TOGGLE_CONTINUOUS|START_RETAINING|STOP_RETAINING|TOGGLE_RETENTION|STATUS|QUIT`
+- Send a command: `bin/rvwctl EXPLAIN|CLARIFY|SCREENSHOT|INTERPRET_SCREEN|SEARCH|RECALL|REINDEX|TOGGLE_CAPTURE|TOGGLE_CONTINUOUS|START_RETAINING|STOP_RETAINING|TOGGLE_RETENTION|STATUS|QUIT`
+  (`SEARCH <words>` and `RECALL <question>` take free text, e.g. `bin/rvwctl RECALL what did they say about reconnect behavior`)
 - Take one screenshot by hand: `bin/screen_capture --output /tmp/shot.png --target frontmost`
 
 ## Notes
@@ -54,8 +59,14 @@
 - `transcript.jsonl` is canonical: one JSON object per utterance, appended and never
   rewritten, each line carrying its own local time and speaker label so it can be read
   without this repository. `transcript.md` is derived from it and rewritten from it, so it can
-  be deleted at any time; nothing reads it back. Any Phase 4 index must be rebuildable the
-  same way.
+  be deleted at any time; nothing reads it back.
+- The Phase 4 search index (`var/index/meetings.db`) is derived the same way: SQLite FTS5 over
+  the transcripts, rebuilt from them by `REINDEX` or `util/rebuild_index.sh` and never
+  synchronised between Macs (principle 7). `SEARCH <words>` ranks matching utterances by BM25
+  and links each back to its meeting, time and any screenshots taken around it; `RECALL
+  <question>` retrieves a few passages, answers from those alone and cites them. Only retained
+  meetings are indexed, and one can opt out with `"index": false` in its `metadata.json`.
+  Semantic/vector retrieval is deliberately not built yet; see `doc/phase4`.
 - Log prefixes: `OK` an action succeeded, `INFO` routine news worth no one's effort,
   `FAIL` a problem needing attention. Never spend FAIL on something working as designed.
 - `util/init_local_models.sh` reads the model, identifier, context length and idle timeout

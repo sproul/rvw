@@ -17,9 +17,9 @@ from rvw.assistant import Assistant
 from rvw.llm import LocalLlmError
 from rvw.transcript import TranscriptSegment
 
-expected_commands = ["CLARIFY", "EXPLAIN", "INTERPRET_SCREEN", "QUIT", "SCREENSHOT",
-                     "START_CAPTURE", "START_RETAINING", "STATUS", "STOP_CAPTURE",
-                     "STOP_RETAINING", "TOGGLE_CAPTURE", "TOGGLE_CONTINUOUS",
+expected_commands = ["CLARIFY", "EXPLAIN", "INTERPRET_SCREEN", "QUIT", "RECALL", "REINDEX",
+                     "SCREENSHOT", "SEARCH", "START_CAPTURE", "START_RETAINING", "STATUS",
+                     "STOP_CAPTURE", "STOP_RETAINING", "TOGGLE_CAPTURE", "TOGGLE_CONTINUOUS",
                      "TOGGLE_RETENTION"]
 
 stub_helper = """#!/bin/sh
@@ -61,7 +61,9 @@ class AssistantCommandTestCase(unittest.TestCase):
         self.root = Path(self.temporary_directory.name)
         self.saved_archive_dir = config.archive_dir
         self.saved_helper_path = config.screen_capture_helper_path
+        self.saved_index_db = config.index_db_path
         config.archive_dir = self.root / "meetings"
+        config.index_db_path = self.root / "index" / "meetings.db"
         self.addCleanup(self.restore_configuration)
         self.assistant = Assistant(["system"])
         self.llm = RecordingLlm()
@@ -71,7 +73,17 @@ class AssistantCommandTestCase(unittest.TestCase):
     def restore_configuration(self):
         config.archive_dir = self.saved_archive_dir
         config.screen_capture_helper_path = self.saved_helper_path
+        config.index_db_path = self.saved_index_db
         self.temporary_directory.cleanup()
+
+    def retain_a_meeting(self, text, started=None):
+        """Write one retained meeting into the archive for the index to find."""
+        from rvw import meeting_archive
+        started = time.mktime((2026, 8, 20, 9, 0, 0, 0, 0, -1)) if started is None else started
+        archive = meeting_archive.MeetingArchive(started, ["system"], retention_mode="retained")
+        archive.record_segment(TranscriptSegment(stream="system", start_epoch=started + 5,
+                                                 end_epoch=started + 9, text=text))
+        archive.stop_retaining()
 
     def install_stub_capture_helper(self):
         path = self.root / "screen_capture"
@@ -280,6 +292,65 @@ class InterpretWithoutAVisionModelTest(AssistantCommandTestCase):
         self.dispatch("INTERPRET_SCREEN")
         time.sleep(0.2)
         self.assertEqual([], self.llm.requests)
+
+
+class SearchCommandTest(AssistantCommandTestCase):
+    """Full text search over retained conversations, tracing hits back to them."""
+
+    def test_search_finds_a_retained_passage_and_names_its_meeting(self):
+        self.retain_a_meeting("the lease timeout was thirty seconds")
+        reply = self.dispatch("SEARCH lease timeout")
+        self.assertTrue(reply.startswith("OK "), reply)
+        self.assertIn("lease timeout", reply)
+        self.assertIn("2026-08-20_09.00", reply)
+
+    def test_search_with_no_hits_says_so_without_failing(self):
+        self.retain_a_meeting("the lease timeout was thirty seconds")
+        self.assertIn("matches", self.dispatch("SEARCH kubernetes"))
+
+    def test_search_without_a_query_is_refused(self):
+        self.assertTrue(self.dispatch("SEARCH").startswith("FAIL "))
+
+
+class ReindexCommandTest(AssistantCommandTestCase):
+    """Rebuilding the disposable index from the canonical transcripts on demand."""
+
+    def test_reindex_reports_what_it_covered(self):
+        self.retain_a_meeting("the lease timeout was thirty seconds")
+        reply = self.dispatch("REINDEX")
+        self.assertTrue(reply.startswith("OK "), reply)
+        self.assertIn("1 meeting", reply)
+
+    def test_a_passage_retained_after_the_first_search_appears_once_reindexed(self):
+        self.assertIn("matches", self.dispatch("SEARCH friday"))
+        self.retain_a_meeting("we will deploy on friday", started=self.a_later_meeting_epoch())
+        self.dispatch("REINDEX")
+        self.assertIn("friday", self.dispatch("SEARCH friday"))
+
+    @staticmethod
+    def a_later_meeting_epoch():
+        return time.mktime((2026, 8, 21, 14, 0, 0, 0, 0, -1))
+
+
+class RecallCommandTest(AssistantCommandTestCase):
+    """Retrieval augmented answers: a few passages, the model, references back."""
+
+    def test_recall_grounds_the_model_on_the_retrieved_passages(self):
+        self.retain_a_meeting("the lease timeout was thirty seconds")
+        reply = self.dispatch("RECALL what was the lease timeout")
+        self.assertTrue(reply.startswith("OK "), reply)
+        content = self.wait_for_one_answer()[0][1]["content"]
+        self.assertIn("lease timeout was thirty seconds", content)
+        self.assertIn("what was the lease timeout", content)
+
+    def test_recall_with_nothing_matching_never_calls_the_model(self):
+        self.retain_a_meeting("the lease timeout was thirty seconds")
+        self.assertIn("matches", self.dispatch("RECALL tell me about kubernetes"))
+        time.sleep(0.2)
+        self.assertEqual([], self.llm.requests)
+
+    def test_recall_without_a_question_is_refused(self):
+        self.assertTrue(self.dispatch("RECALL").startswith("FAIL "))
 
 
 if __name__ == "__main__":

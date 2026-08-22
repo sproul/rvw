@@ -1,0 +1,129 @@
+PHASE 4 - SEARCHABLE MEETING MEMORY
+===================================
+Written 2026-08-21. Implemented and verified the same day. Phases 0 to 3 are
+unchanged. The suite is 203 tests, up from 165: 18 for the index, 15 for recall
+formatting and the recall prompt, and 5 for the new assistant commands.
+
+
+What is new
+-----------
+Retained conversations are now searchable, and a question can be answered from
+them with references back to where the answer came from. Three commands:
+
+  SEARCH  <words>       full text search over every retained conversation
+  RECALL  <question>    answer the question from a few retrieved passages, cited
+  REINDEX               rebuild the index from the canonical transcripts
+
+They take free text, so they are socket/rvwctl commands rather than hotkeys, the
+same way the spec's learning #6 said to keep new actions as dispatcher commands.
+util/rebuild_index.sh does the same rebuild as REINDEX without a running daemon,
+for a cron job or after copying an archive between Macs.
+
+
+The index is derived data, and stays that way
+----------------------------------------------
+The transcripts are the record; the index is SQLite FTS5 over them and nothing
+more. It lives at var/index/meetings.db (RVW_INDEX_DB moves it), can be deleted
+at any moment, and rebuilds from the transcript.jsonl files alone. Principle 7
+forbids ever synchronising it between Macs: the transcripts are synchronised and
+each Mac rebuilds its own index, which is what REINDEX and rebuild_index.sh are.
+
+SQLite FTS5 ships with Python, ranks by BM25 and needs no new dependency. This is
+also why "do not make SQLite the canonical archive" is not contradicted: nothing
+canonical is in it. Delete meetings.db and nothing is lost.
+
+One row is one utterance. The words are indexed; everything a hit needs to point
+back at its conversation is stored beside them, UNINDEXED so FTS never tokenises
+it: the meeting, its date, the utterance's own timestamp, the speaker, and the
+directory that also holds the screenshots taken around it. A rebuild reads each
+transcript through meeting_archive.read_transcript_records, the same reader the
+Markdown rendering uses, so the index cannot parse a line differently from the
+rest of the system, and a line that cannot be read back stops the rebuild rather
+than being silently skipped.
+
+
+Only authorised transcripts
+---------------------------
+"Authorised" is not a new switch to forget to set. An ephemeral session wrote no
+transcript, so there is nothing of it to index; only a conversation deliberately
+kept is there to be found. A meeting kept but not for searching can still opt out
+with "index": false in its metadata.json, which the indexer honours, for the one
+kept conversation that should not resurface in a later search.
+
+
+Search, and what a hit carries
+------------------------------
+The query is arbitrary user text, so it is turned into a safe FTS MATCH string:
+each word is quoted, so punctuation is searched for rather than read as FTS query
+syntax and surfaced as an error, and the words are joined with OR. OR is recall;
+BM25 is precision. A passage need not contain every word to be a hit, but one
+that matches more of them ranks above one that matches fewer, so a stray word in
+the query loses nothing and the best passage still comes first.
+
+A hit links back to the meeting, its date, the passage's own timestamp, the
+verbatim words, and the screenshots captured within two minutes of the passage in
+the same meeting. That last association is by time within the one directory, the
+same principle Phase 3 used to associate an image with the speech around it; no
+new index of screenshots exists to be lost.
+
+
+Retrieval augmented recall
+--------------------------
+RECALL retrieves a few passages -- recall_passage_count, six by default, never
+the whole archive -- and asks the local model to answer from those and nothing
+else. The passages are numbered, the model is told to cite the numbers it used,
+and the same numbered list is printed to me as the answer's sources, each naming
+the meeting and pointing at its directory, so an answer that says "[2]" can be
+traced to the second source shown. The system prompt holds the model to the
+passages and tells it to say when they do not answer the question, because a
+confident answer with no source is the thing this phase exists to avoid.
+
+The answer streams to the assistant terminal on the one answering path every
+model-facing action already shares; RECALL is a retrieval step, a prompt and a
+dispatcher entry, not new answering machinery.
+
+
+Design decisions
+----------------
+The index is built once, lazily, on the first SEARCH or RECALL, and REINDEX
+refreshes it. Building at start-up would delay every launch for a feature not
+every session uses; never building would make the first search surprising. A live
+retained session appends to today's transcript while the index is a rebuild
+behind, which REINDEX or rebuild_index.sh closes; the MVA does not index each
+utterance as it is spoken.
+
+Every index operation happens on the control thread, which serves one command at
+a time, so a search and a rebuild never overlap and the index needs no lock of its
+own. Each call opens and closes its own SQLite connection, so no connection is
+shared between threads.
+
+Semantic/vector retrieval is deliberately not built. The spec asks for it only if
+it provides material value, and BM25 over one person's own meetings, where the
+words searched for are usually the words that were said, has not yet shown a gap
+it would fill. Retrieval sits behind one function, so it can be added later
+without touching the commands or the prompt.
+
+
+Verified
+--------
+- rebuild_index.sh over a synthetic archive of two meetings reported "indexed 4
+  utterance(s) from 2 meeting(s)" and exited 0.
+- SEARCH returned the matching passages ranked, each naming its meeting and date
+  and time, with the screenshot taken beside the passage associated to it.
+- RECALL retrieved the passages, printed the numbered sources pointing at the
+  meeting directory, and built a system+user prompt that carries the passages and
+  the question and demands citations.
+- Deleting meetings.db and rebuilding gave byte-identical search answers, which is
+  the property that makes the index disposable.
+- An ephemeral meeting contributed nothing; a meeting marked "index": false was
+  excluded; a transcript line that is not JSON stopped the rebuild naming the file.
+- The full suite is 203 tests, all passing.
+
+
+Still to verify
+---------------
+- RECALL against the real local model, end to end, rather than the recorded stub:
+  the retrieval, the prompt and the streaming are exercised, but no real answer
+  from Qwen3.6 grounded on real passages has been read yet.
+- A large archive. The longest retained history so far is a handful of short
+  meetings, and the first-use rebuild is the only cost that grows with the archive.
