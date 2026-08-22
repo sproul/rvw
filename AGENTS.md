@@ -14,8 +14,11 @@
   sidecar metadata; move the root with `RVW_ARCHIVE_DIR`
 
 ## Commands
-- Set up everything: `util/init.sh` (models, then permissions)
+- Set up everything: `util/init.sh` (models, the login agent, then permissions)
 - Set up models and the python environment: `util/init_local_models.sh` (`-dry` to preview, `-y` unattended)
+- Install the LaunchAgent that starts the LLM endpoint at login: `util/init_llm_autostart.sh` (`-dry` to preview)
+- Start the LLM endpoint now, if it is not already up: `util/start_llm_server.sh`
+- List every model on the machine, in both stores: `util/list_models.sh`
 - Check and request the macOS permissions: `util/init_permissions.sh` (`-open` jumps to the
   settings pane of anything missing, `-reset` makes macOS ask again after a refusal)
 - Build both capture helpers and `bin/rvw.app`: `helper/build.sh`
@@ -30,6 +33,11 @@
 - The venv is `.venv` at the repo root, python 3.12 arm64; MLX needs arm64 throughout.
 - The LLM is reached at `http://127.0.0.1:1234/v1` under the identifier
   `meeting-assistant`; override with `RVW_LLM_MODEL` and `RVW_LLM_URL`.
+- The LM Studio server does not survive a reboot: `lms server` has no boot option and the
+  installer starts it once. Nothing looks wrong afterwards, because the assistant still
+  listens and transcribes and only a question finds the endpoint gone, so the LaunchAgent
+  `ai.rvw.llm_server` runs `util/start_llm_server.sh` at login instead. The installer runs
+  that same script, so there is one account of what "the LLM is up" means.
 - The LLM loads on demand: LM Studio unloads it after `llm_idle_ttl_seconds` idle, and
   `src/rvw/model_loader.py` loads it again on the first question, which costs that one
   question about 45s. An unloaded model is ordinary and is logged INFO, not FAIL.

@@ -139,13 +139,14 @@ install_llmster_if_missing() {
     log_ok "installed llmster; add $lms_bin_dir to PATH in your shell profile"
 }
 
-start_llmster_daemon() {
-    if lms daemon status >/dev/null 2>&1; then
-        log_ok "llmster daemon already running"
-        return 0
-    fi
-    run_cmd lms daemon up || die "could not start the llmster daemon"
-    log_ok "started the llmster daemon"
+# The daemon and the endpoint are brought up by util/start_llm_server.sh, which
+# is also what the login LaunchAgent runs, so there is one description of what
+# "the LLM is up" means rather than one here and another at login.
+ensure_llm_server_running() {
+    local -a dry_flag=()
+    [[ $dry_mode -eq 1 ]] && dry_flag=(-dry)
+    "$script_dir/start_llm_server.sh" "${dry_flag[@]}" ||
+        die "could not bring up the LLM endpoint"
 }
 
 # A bare "owner/name" is resolved against the LM Studio Hub, so the full URL is needed for Hugging Face.
@@ -183,11 +184,6 @@ load_llm_model() {
     run_cmd lms load "$model_key" --context-length "$llm_context_length" \
         --ttl "$llm_idle_ttl_seconds" --identifier "$llm_identifier" || die "could not load $model_key"
     log_ok "loaded $model_key as '$llm_identifier' (context $llm_context_length, ttl ${llm_idle_ttl_seconds}s)"
-}
-
-start_llm_server() {
-    run_cmd lms server start --port "$llm_server_port" || die "could not start the LM Studio server"
-    log_ok "OpenAI-compatible API listening on $llm_server_url"
 }
 
 # Qwen3.6 is a reasoning model, so the answer may arrive as reasoning_content when the budget is tight.
@@ -294,10 +290,9 @@ SUMMARY
 main() {
     check_preconditions
     install_llmster_if_missing
-    start_llmster_daemon
+    ensure_llm_server_running
     download_llm_model
     load_llm_model
-    start_llm_server
     verify_llm_server
     create_python_env
     download_whisper_model

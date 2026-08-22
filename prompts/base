@@ -61,11 +61,15 @@ What exists in the repository:
 * `bin/rvw` (daemon) and `bin/rvwctl` (hotkey client, system python, stdlib
   only). `hammerspoon/rvw_hotkeys.lua` binds the keys and is required from
   `~/.hammerspoon/init.lua`.
-* `test/` with 103 unittest tests, run by `util/run_tests.sh`.
+* `test/` with 130 unittest tests, run by `util/run_tests.sh`.
 * `util/init_local_models.sh` installs and verifies the model stack, and
   `util/init_permissions.sh` explains, probes and reports every macOS privacy
   permission (Microphone, Audio Recording, Screen Recording, Accessibility);
-  `util/init.sh` runs both.
+  `util/init_llm_autostart.sh` installs the LaunchAgent that runs
+  `util/start_llm_server.sh` at login, because the LM Studio server has no boot
+  option of its own and its absence is invisible until a question is asked;
+  `util/list_models.sh` shows both model stores; `util/init.sh` runs the three
+  installers.
 
 Commands understood today: `EXPLAIN [seconds]`, `CLARIFY [seconds]`,
 `SCREENSHOT`, `INTERPRET_SCREEN [seconds]`, `START_CAPTURE [streams]`,
