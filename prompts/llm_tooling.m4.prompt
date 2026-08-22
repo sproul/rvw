@@ -1,0 +1,212 @@
+# Finish the LM Studio tooling work in ~/dp/git/rvw
+
+Handoff written 2026-08-21 on the M4 Air, partway through the task. Everything
+described under "Already done" is on disk and passing; everything under "What is
+left" is not started. Work on whichever machine you are on, but read "Machine
+differences" first, because this was verified on the M4 and the M3 is not in the
+same state.
+
+## The project
+
+`~/dp/git/rvw` is a local macOS listening assistant: it captures microphone and
+system audio, transcribes with MLX Whisper, and answers questions about the last
+minute of conversation with a local LLM served by LM Studio. Read `AGENTS.md`
+first, then `doc/phase2` for the most recent design decisions and measurements.
+`prompts/base` is the specification and its CURRENT STATE section is kept up to
+date; Phases 0 to 2 are done.
+
+Run the tests with `util/run_tests.sh` (unittest, no pytest in the venv). There
+are 113 and they all pass right now. `util/run_tests.sh -k list_models` runs one
+file.
+
+## How this task started
+
+I was asked two questions: how to see what models are on the machine, and
+whether LM Studio should be installed as part of `util/init.sh`. The answer to
+the second was no, it already is: `init.sh` line 7 runs `init_local_models.sh`,
+whose `main()` calls `install_llmster_if_missing`. The user then approved two
+pieces of work, one finished and one not:
+
+1. `util/list_models.sh`, a single command showing both model stores. DONE.
+2. A LaunchAgent so the LM Studio server survives a reboot. NOT STARTED.
+
+Number 2 exists because `lms server` offers only `start`, `stop` and `status`,
+with no boot option, and `init_local_models.sh` starts the server once at setup
+time. After a reboot the assistant starts normally and every question fails
+until someone runs `lms server start` by hand.
+
+## Already done, uncommitted
+
+    ?? util/assistant_settings.sh      new
+    ?? util/list_models.sh             new
+    ?? test/shell_script_testing.py    new
+    ?? test/test_list_models.py        new
+     M util/init_local_models.sh       uses assistant_settings.sh now
+     M test/test_permission_probe.py   uses shell_script_testing.py now
+
+`util/assistant_settings.sh` is a sourced library, not a program. It holds
+`read_assistant_setting <name>`, which reads any module level variable out of
+`src/rvw/config.py`, and `read_llm_server_port`, which parses the port out of
+`config.llm_base_url`. It exists so that the identifiers and the port are
+written down once, in `config.py`, and every shell script asks rather than
+repeating them. `init_local_models.sh` was moved onto it and its hardcoded
+`llm_server_port=1234` is gone. Follow this: do not hardcode a port, an
+identifier or a model name anywhere in the work below.
+
+`util/list_models.sh` reports the LM Studio store (`lms ls`, `lms ps`), then the
+identifiers the assistant asks for, then the Hugging Face cache. Its real output
+on the M4:
+
+    LM Studio, downloaded
+    qwen3.6-35b-a3b    35B    qwen3_5_moe    20.43 GB    Local   LOADED
+    text-embedding-nomic-embed-text-v1.5    Nomic BERT    84.11 MB
+
+    LM Studio, loaded right now
+    meeting-assistant    qwen3.6-35b-a3b    IDLE    20.43 GB    34560    1h
+
+    Identifiers the assistant asks for
+    OK   meeting-assistant is served, so EXPLAIN and CLARIFY will reach it
+    FAIL meeting-vision is not served, so INTERPRET_SCREEN would be answered by
+         whatever model is loaded
+
+    Hugging Face cache, which LM Studio never sees
+         mlx-community/whisper-large-v3-turbo          1.6G
+         pyannote/speaker-diarization-community-1     32.8M
+
+`test/shell_script_testing.py` is the harness that lets a python test drive the
+functions inside a bash script. Reuse it; do not invent a second way.
+
+## What is left
+
+### 1. util/start_llm_server.sh
+
+One script that makes sure the llmster daemon and the OpenAI compatible server
+are both up, and does nothing if they already are. It is what the LaunchAgent
+runs, and it must also replace the two functions that do this today inside
+`init_local_models.sh`, `start_llmster_daemon` and `start_llm_server`, so that
+the logic exists in one place. `init_local_models.sh` supports `-dry` through
+its `run_cmd`, so the extracted script needs its own `-dry` and
+`init_local_models.sh` has to keep honouring it.
+
+Read the port with `read_llm_server_port` from `assistant_settings.sh`.
+
+Critical: invoke `lms` by absolute path, `$HOME/.lmstudio/bin/lms`. A LaunchAgent
+runs with almost no environment and none of your shell profile, so a bare `lms`
+will not be found at login. This is the same lesson already recorded in
+`src/rvw/config.py`, where `lms_command` is absolute because `rvw.app` inherits
+no shell PATH.
+
+### 2. util/init_llm_autostart.sh
+
+Generates and installs the LaunchAgent. Decisions already taken:
+
+- label `ai.rvw.llm_server`, matching the `ai.rvw.assistant` bundle identifier
+- plist written to `~/Library/LaunchAgents/ai.rvw.llm_server.plist`
+- generated, not shipped as a static file, because it has to contain the
+  absolute path of this checkout and the checkout is explicitly allowed to live
+  anywhere; see the comment at the top of `helper/rvw_launcher.swift`
+- `ProgramArguments` runs `util/start_llm_server.sh`
+- `RunAtLoad` true, and no `KeepAlive`: the script starts the server and exits,
+  the server itself is the llmster daemon's business
+- output to `var/log/llm_server.launchagent.log`
+- install with `launchctl bootout gui/$UID/ai.rvw.llm_server` (ignoring failure
+  when it is not loaded) then `launchctl bootstrap gui/$UID <plist>`. Do not use
+  `launchctl load`; it is deprecated and this is macOS 26.
+- rerunning must be safe, and `-dry` must change nothing
+
+Do not put this plist in `helper/`. The three plists there are Info.plists
+embedded into binaries, an entirely different thing, and confusing them would be
+easy.
+
+### 3. util/init.sh
+
+Add the autostart step. `init.sh` puts `util/` on PATH, so the existing lines
+call bare script names; match that.
+
+### 4. Verify it for real
+
+    util/init_llm_autostart.sh
+    launchctl print gui/$UID/ai.rvw.llm_server | head -20
+    lms server stop
+    launchctl kickstart -k gui/$UID/ai.rvw.llm_server
+    sleep 5 && lms server status          # expect: running
+    util/list_models.sh                   # expect: meeting-assistant served again
+
+A real reboot is the only complete test. Ask the user before rebooting their
+machine; do not do it unasked.
+
+### 5. Document it
+
+`AGENTS.md`, under Commands, gets `util/list_models.sh` and
+`util/init_llm_autostart.sh`. Under Notes, record that the LM Studio server does
+not survive a reboot on its own and that the LaunchAgent is what fixes it. Keep
+the existing tone: short, factual, and say why rather than what.
+
+## Facts you need that are not obvious
+
+The endpoint lies about models. Asked for an identifier it does not serve, this
+LM Studio build neither refuses nor loads anything: it answers with whatever
+model is loaded and names that substitute in the response. Verified directly:
+a request naming `totally-nonexistent-model-xyz` came back as
+`"model": "meeting-assistant"`. `src/rvw/llm.py` guards both ends because of it
+and `INTERPRET_SCREEN` checks before promising an answer. Never add a code path
+that trusts this endpoint to serve what it was asked for.
+
+Every script in `util/` ends with a bare `exit` on a line of its own, followed by
+example invocations. That is the user's convention, it is deliberate, and it must
+be left in place. It also means sourcing such a script would end the shell that
+sourced it, so anything testable also carries
+
+    if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+            main "$@"
+    fi
+
+and the tests source a copy truncated at that `exit`. `sourceable_copy_of` in
+`test/shell_script_testing.py` does all of it, including building a stand in
+repository so the copied script still resolves `src/` and `.venv/` above itself.
+`write_stand_in_command` puts a fake `lms` or `launchctl` on PATH; note that a
+script which looks under `$HOME` for a command needs `run_bash_using(..., home=)`
+as well, since PATH alone will not shadow it.
+
+Never rebuild `bin/rvw.app` unnecessarily. Its ad hoc signature is pinned to the
+launcher's cdhash and re-signing voids every macOS permission granted to it.
+`helper/build_app.sh` already rebuilds only when its own sources change; leave
+that alone.
+
+## How to work
+
+The user requires real TDD: write the failing test first, watch it fail for the
+right reason, make it pass, then refactor. When I skipped straight to asserting,
+two of my tests passed vacuously and hid a live bug for an hour. Prove RED before
+you believe GREEN.
+
+Other house rules that bite in this repo: snake_case; spaces, never tabs; no
+unicode characters anywhere; log lines start with `OK `, `FAIL ` or `INFO `, and
+`FAIL` is reserved for something actually wrong, never for a state working as
+designed; functions under about 25 lines, with names that say what they do; no
+comment explaining the next six lines when a named function would say it better;
+no duplicated logic; paths relative to the script's own location, never absolute
+roots and never a fallback search for a file in a second location.
+
+Fix bugs under 50 lines immediately rather than asking. If a command's output
+contains `FAIL`, investigate it rather than moving on.
+
+## Machine differences
+
+This was all verified on the M4 Air, 32 GB, hostname m4. There, all four macOS
+permissions are granted, `meeting-assistant` is loaded, and no vision model
+exists anywhere. On the M3, 96 GB, the permissions were last measured on
+2026-08-16 as microphone and system audio granted, screen recording declined and
+Hammerspoon without Accessibility; run `util/init_permissions.sh` and believe
+what it says now rather than that note. `EXPLAIN` takes 78 s on the Air for a
+60 s window, which is a model sizing problem recorded in `doc/phase2`, not
+something for this task.
+
+## When you are done
+
+Run the full suite. Then, per the user's global rules, save the session
+transcript to
+`$dp/git/doc/prompts/YYYY-MM-DD_HH.mm.$HOSTNAME.$IDE_NAME.<task>`, redacting any
+secret that appeared in a tool call, and offer a one line commit message in the
+user's style: lowercase, descriptive prose, often ending with the host name, for
+example "start the lm studio server at login with a launchagent on m3".

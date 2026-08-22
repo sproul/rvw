@@ -16,19 +16,18 @@ just emptied. The next probe then reads that line as its own helper's verdict
 and reports a granted permission as missing.
 
 The script is therefore sourced rather than executed here, which is what the
-guard around main() in it is for.
+guard around main() in it is for; see test/shell_script_testing.py.
 """
 
 import subprocess
 import tempfile
-import textwrap
 import time
 import unittest
 from pathlib import Path
 
-repo_dir = Path(__file__).resolve().parents[1]
-permissions_script = repo_dir / "util" / "init_permissions.sh"
-notes_separator = "\nexit\n"
+from shell_script_testing import run_bash_using, sourceable_copy_of, util_dir
+
+permissions_script = util_dir / "init_permissions.sh"
 
 sourceable_script = None
 
@@ -36,29 +35,12 @@ sourceable_script = None
 def setUpModule():
     """One sourceable copy of the script, shared by every test below."""
     global sourceable_script
-    directory = tempfile.mkdtemp(prefix="rvw_probe_functions_")
-    sourceable_script = Path(directory) / "init_permissions_functions.sh"
-    sourceable_script.write_text(function_definitions_only(), encoding="utf-8")
-
-
-def function_definitions_only():
-    """Everything above the bare 'exit' that ends the script.
-
-    The invocation notes kept after that exit are deliberate and harmless when
-    the script is run, but the exit itself would end the shell that sourced it
-    before a single function had been called, which would make every assertion
-    below pass without testing anything.
-    """
-    text = permissions_script.read_text(encoding="utf-8")
-    if notes_separator not in text:
-        raise AssertionError("%s no longer ends with a bare exit" % permissions_script)
-    return text.split(notes_separator, 1)[0] + "\n"
+    sourceable_script = sourceable_copy_of("init_permissions.sh")
 
 
 def run_bash_using_the_script(body):
     """Source the probe script for its functions and run one fragment against them."""
-    program = "source %s\n%s" % (sourceable_script, textwrap.dedent(body))
-    return subprocess.run(["bash", "-c", program], capture_output=True, text=True, timeout=120)
+    return run_bash_using(sourceable_script, body)
 
 
 def process_is_alive(pid):

@@ -13,27 +13,26 @@ set -o pipefail
 script_dir=$(cd "$(dirname "$BASH_SOURCE")" && pwd)
 repo_dir=$(cd "$script_dir/.." && pwd)
 source "$script_dir/ffmpeg_env.sh"                     # add_ffmpeg_libs_to_dyld_path, shared with bin/rvw
+source "$script_dir/assistant_settings.sh"             # read_assistant_setting, read_llm_server_port
 venv_dir=$repo_dir/.venv
 venv_python=$venv_dir/bin/python
 python_request=cpython-3.12-macos-aarch64-none          # spelled out so an x86_64 build is never selected
 
 # The daemon loads the LLM on demand and has to agree with this script about
 # which model, under which identifier and with which limits, so src/rvw/config.py
-# is the one place any of it is written down.
-read_assistant_setting() {
-    PYTHONPATH=$repo_dir/src python3 -c \
-        'import sys; from rvw import config; print(getattr(config, sys.argv[1]))' "$1" ||
-        die "cannot read $1 from src/rvw/config.py"
+# is the one place any of it is written down; assistant_settings.sh reads it.
+require_assistant_setting() {
+    read_assistant_setting "$1" || die "cannot read $1 from src/rvw/config.py"
 }
 
-llm_model=$(read_assistant_setting llm_source_model)    # override with the first positional argument
+llm_model=$(require_assistant_setting llm_source_model) # override with the first positional argument
 whisper_model=mlx-community/whisper-large-v3-turbo
 diarization_model=pyannote/speaker-diarization-community-1
 
-llm_identifier=$(read_assistant_setting llm_model)
-llm_context_length=$(read_assistant_setting llm_context_length)
-llm_idle_ttl_seconds=$(read_assistant_setting llm_idle_ttl_seconds)
-llm_server_port=1234
+llm_identifier=$(require_assistant_setting llm_model)
+llm_context_length=$(require_assistant_setting llm_context_length)
+llm_idle_ttl_seconds=$(require_assistant_setting llm_idle_ttl_seconds)
+llm_server_port=$(read_llm_server_port) || die "cannot read the port from config.llm_base_url"
 llm_server_url=http://127.0.0.1:$llm_server_port/v1
 
 hf_token_file=$HOME/.huggingface_token
