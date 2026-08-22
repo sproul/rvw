@@ -44,25 +44,55 @@ class LocalLlm:
         reported through on_reasoning, so a reasoning model does not spray its
         scratch work over the explanation.
         """
-        self._load_the_model_if_it_has_been_unloaded()
+        self._require_the_requested_model_is_ready()
         request = self._build_request(messages)
         answer, reasoning = [], []
         with urllib.request.urlopen(request, timeout=config.llm_request_timeout_seconds) as response:
             for line in response:
-                delta = self._parse_stream_line(line)
-                if delta is None:
+                chunk = self._parse_stream_line(line)
+                if chunk is None:
                     continue
-                self._collect_delta(delta, answer, reasoning, on_token, on_reasoning)
+                self._require_the_model_that_answered_is_the_one_asked(chunk)
+                self._collect_delta(chunk.get("delta") or {}, answer, reasoning,
+                                    on_token, on_reasoning)
         if not answer and reasoning:
             log.info("OK  the model answered from its reasoning channel only")
             return "".join(reasoning).strip()
         return "".join(answer).strip()
 
+    def _require_the_requested_model_is_ready(self):
+        """Either bring the model back, or refuse to let another one answer for it."""
+        if self._loads_on_demand:
+            self._load_the_model_if_it_has_been_unloaded()
+            return
+        self._require_the_model_is_being_served()
+
+    # Measured against LM Studio on 2026-08-21: asked for an identifier it has
+    # never heard of, this build neither refuses nor loads anything. It answers
+    # with whatever model is loaded and names that substitute in the response, so
+    # a screenshot sent to the vision model came back interpreted by the text
+    # model and looked like a success. Trusting the endpoint to serve what it was
+    # asked for is therefore not safe, and both of these guards exist because
+    # either one alone can be defeated: the listing can be right and the routing
+    # wrong, and a substitution can be noticed only once the answer arrives.
+    def _require_the_model_is_being_served(self):
+        served = self.available_models()
+        if self._model in served:
+            return
+        raise LocalLlmError("no model is loaded as '%s', and this endpoint would answer with "
+                            "%s instead of refusing, so nothing was asked of it"
+                            % (self._model, ", ".join(served) or "nothing"))
+
+    def _require_the_model_that_answered_is_the_one_asked(self, chunk):
+        answering_model = chunk.get("model")
+        if not answering_model or answering_model == self._model:
+            return
+        raise LocalLlmError("'%s' answered a question meant for '%s'; one model's answer must "
+                            "never be passed off as another's" % (answering_model, self._model))
+
     def _load_the_model_if_it_has_been_unloaded(self):
         """LM Studio unloads an idle model on purpose, so the first question
         after a quiet hour has to wait for it to come back."""
-        if not self._loads_on_demand:
-            return
         try:
             model_loader.ensure_the_configured_model_is_loaded(self.available_models())
         except model_loader.ModelLoadError as error:
@@ -78,14 +108,16 @@ class LocalLlm:
 
     @staticmethod
     def _parse_stream_line(raw_line):
+        """One streamed chunk: the model that is answering, and its next tokens."""
         line = raw_line.decode("utf-8", "replace").strip()
         if not line.startswith("data:"):
             return None
         body = line[len("data:"):].strip()
         if not body or body == "[DONE]":
             return None
-        choices = json.loads(body).get("choices") or [{}]
-        return choices[0].get("delta") or {}
+        parsed = json.loads(body)
+        choices = parsed.get("choices") or [{}]
+        return {"model": parsed.get("model"), "delta": choices[0].get("delta") or {}}
 
     @staticmethod
     def _collect_delta(delta, answer, reasoning, on_token, on_reasoning):

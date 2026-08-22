@@ -176,14 +176,33 @@ class Assistant:
     def _command_interpret_screen(self, arguments):
         """The same archival save, then a private interpretation in this terminal."""
         saved = screenshot.capture_screenshot(self._session_started_epoch)
+        return "screenshot saved as %s; %s" % (saved.image_path.name,
+                                               self._interpretation_of(saved, arguments))
+
+    def _interpretation_of(self, saved, arguments):
+        """The image is archived whatever happens here; interpreting it is optional."""
+        unavailable = self._why_the_vision_model_cannot_answer()
+        if unavailable:
+            return unavailable
         window_seconds = self._requested_window_seconds(arguments,
                                                        config.interpret_window_seconds)
         transcript_text = self._transcript.render_window(window_seconds, now=time.time())
         messages = prompts.build_interpret_messages(
             transcript_text, screenshot.read_image_as_data_uri(saved.image_path), window_seconds)
-        return "screenshot saved as %s; %s" % (
-            saved.image_path.name,
-            self._start_answer(self._vision_llm, messages, transcript_text, "interpretation"))
+        return self._start_answer(self._vision_llm, messages, transcript_text, "interpretation")
+
+    def _why_the_vision_model_cannot_answer(self):
+        """LM Studio answers a request for an identifier it does not serve with
+        whatever model is loaded, so a screenshot sent to an absent vision model
+        comes back described by the text model and looks like an interpretation.
+        Asking here what is loaded is the only way to tell the two apart."""
+        try:
+            served = self._vision_llm.available_models()
+        except LocalLlmError as error:
+            return "not interpreted: %s" % error
+        if config.vision_llm_model in served:
+            return None
+        return "not interpreted: no model is loaded as '%s'" % config.vision_llm_model
 
     def _command_status(self, arguments):
         running = [name for name, stream in self._streams.items() if stream.is_running]

@@ -41,9 +41,19 @@
 - Qwen3.6 thinks ~489 tokens before a one sentence answer and this LM Studio build ignores
   every request level reasoning control; see the measurements in `src/rvw/config.py`.
 - `INTERPRET_SCREEN` needs a vision model loaded as `meeting-vision`; override with
-  `RVW_VLM_MODEL`. Everything else works without it.
+  `RVW_VLM_MODEL`. Everything else works without it. Without one it archives the image
+  and replies `not interpreted: no model is loaded as 'meeting-vision'`.
+- This LM Studio build answers a request for an identifier it does not serve with
+  whatever model is loaded, and names that substitute in the response, so it never
+  refuses. `llm.py` therefore checks that the identifier is served before asking, and
+  checks the answering model in every streamed chunk. Do not remove either check: without
+  them a screenshot sent to the vision model comes back written by the text model and
+  looks like a success.
 - Microphone, system audio and screen recording are granted to `bin/rvw.app`, and
   Accessibility to Hammerspoon; `util/init_permissions.sh` explains and probes all four.
+  Both audio probes read one launcher log, so each probe waits for the launcher to record
+  the helper's exit before returning; without that wait the next probe reads the previous
+  one's verdict and calls a granted permission missing.
   The bundle only becomes the responsible application when LaunchServices starts it, so
   everything that needs those permissions goes through `open -n -a bin/rvw.app`.
 - Re-signing `bin/rvw.app` voids every permission granted to it: an ad hoc signature is

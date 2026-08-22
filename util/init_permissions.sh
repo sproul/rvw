@@ -62,6 +62,10 @@ log_dir=$repo_dir/var/log
 # the helper to say what happened, and stop the moment it has said it.
 probe_deadline_seconds=60
 
+# Stopping a helper is quick, and the launcher only has one line left to write.
+exit_report_attempts=50
+exit_report_poll_seconds=0.1
+
 dry_mode=0                              # set by -dry; probes nothing, changes nothing
 open_settings_mode=0                    # set by -open; opens the settings pane of each missing permission
 reset_mode=0                            # set by -reset; clears the decisions so macOS asks again
@@ -109,10 +113,30 @@ wait_for_helper_verdict() {
 
 # The launcher records the helper's pid before anything else it says.
 stop_the_helper_named_in() {
-    local pid
-    pid=$(sed -n 's/^OK   started .* as pid \([0-9][0-9]*\)$/\1/p' "$1" | tail -1)
+    local log=$1 pid
+    pid=$(sed -n 's/^OK   started .* as pid \([0-9][0-9]*\)$/\1/p' "$log" | tail -1)
     [[ -n $pid ]] && kill "$pid" 2>/dev/null
+    wait_until_the_launcher_reported_the_exit "$log"
     return 0
+}
+
+# Both audio probes read the same log, because the launcher names it after the
+# program and there is only one audio helper. The launcher outlives its helper
+# by the moment it takes to report the exit and holds that log open for
+# appending, so returning as soon as the helper has spoken leaves the launcher
+# free to append "exited with status 0" into the log the next probe has just
+# emptied. The next probe reads that line as its own helper's verdict and calls
+# a granted permission missing, which is exactly what happened to whichever
+# audio probe ran second. Waiting here for the exit line makes the log quiet
+# before anybody empties it again.
+wait_until_the_launcher_reported_the_exit() {
+    local log=$1 attempts=0
+    while (( attempts < exit_report_attempts )); do
+        LC_ALL=C grep -q 'exited with status' "$log" && return 0
+        sleep "$exit_report_poll_seconds"
+        attempts=$((attempts + 1))
+    done
+    log_fail "the launcher never reported the helper's exit, so $log may still be written to"
 }
 
 require_the_helpers_and_the_bundle_are_built() {
@@ -263,34 +287,41 @@ main() {
     print_summary
 }
 
-t=`mktemp`; trap "rm -f $t*" EXIT
+parse_command_line() {
+        while (( $# >= 1 )); do
+                case "$1" in
+                        -dry)
+                                dry_mode=1
+                        ;;
+                        -open)
+                                open_settings_mode=1
+                        ;;
+                        -reset)
+                                reset_mode=1
+                        ;;
+                        -x)
+                                set -x
+                        ;;
+                        -*)
+                                echo "FAIL unrecognized flag $1" 1>&2
+                                exit 1
+                        ;;
+                        *)
+                                break
+                        ;;
+                esac
+                shift
+        done
+}
 
-while (( $# >= 1 )); do
-        case "$1" in
-                -dry)
-                        dry_mode=1
-                ;;
-                -open)
-                        open_settings_mode=1
-                ;;
-                -reset)
-                        reset_mode=1
-                ;;
-                -x)
-                        set -x
-                ;;
-                -*)
-                        echo "FAIL unrecognized flag $1" 1>&2
-                        exit 1
-                ;;
-                *)
-                        break
-                ;;
-        esac
-        shift
-done
-
-main
+# Executed, this probes everything. Sourced, it only defines the functions, so
+# that test/test_permission_probe.py can exercise them without touching a single
+# macOS permission.
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+        t=`mktemp`; trap "rm -f $t*" EXIT
+        parse_command_line "$@"
+        main
+fi
 
 exit
 $dp/git/rvw/util/init_permissions.sh

@@ -39,7 +39,7 @@ class RecordingLlm:
 
     def __init__(self):
         self.requests = []
-        self.served_models = [config.llm_model]
+        self.served_models = [config.llm_model, config.vision_llm_model]
         self.raise_on_available_models = False
 
     def stream_chat(self, messages, on_token, on_reasoning=None):
@@ -181,6 +181,33 @@ class InterpretScreenCommandTest(AssistantCommandTestCase):
         self.install_stub_capture_helper()
         self.assertTrue(self.dispatch("INTERPRET_SCREEN").startswith("OK "))
         self.assertEqual(1, len(self.wait_for_one_answer()))
+
+
+class InterpretWithoutAVisionModelTest(AssistantCommandTestCase):
+    """LM Studio answers a request for an identifier it does not serve with
+    whatever model is loaded, so an absent vision model has to be noticed here.
+    Interpreting a screenshot with the text model and calling it an
+    interpretation would be the one failure nobody could see."""
+
+    def setUp(self):
+        super().setUp()
+        self.llm.served_models = [config.llm_model]
+        self.install_stub_capture_helper()
+
+    def test_the_image_is_still_archived_when_nothing_can_interpret_it(self):
+        reply = self.dispatch("INTERPRET_SCREEN")
+        self.assertTrue(reply.startswith("OK "), reply)
+        self.assertEqual(1, len(sorted(config.archive_dir.rglob("*.png"))))
+
+    def test_the_reply_says_the_screenshot_was_not_interpreted_and_why(self):
+        reply = self.dispatch("INTERPRET_SCREEN")
+        self.assertIn("not interpreted", reply)
+        self.assertIn(config.vision_llm_model, reply)
+
+    def test_no_model_is_asked_to_interpret_the_image(self):
+        self.dispatch("INTERPRET_SCREEN")
+        time.sleep(0.2)
+        self.assertEqual([], self.llm.requests)
 
 
 if __name__ == "__main__":

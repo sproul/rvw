@@ -29,11 +29,14 @@ The system should eventually choose appropriately sized local models for each ma
 9. Every phase should end in something runnable and testable.
 10. Prefer a CLI or minimal menu-bar utility over a sophisticated GUI until the core system proves useful.
 
-# CURRENT STATE — updated 2026-08-16 after Phase 2 (m3)
+# CURRENT STATE — updated 2026-08-21 after verifying Phase 2 (m4)
 
-Phases 0 and 1 are implemented and verified on the M4 Air. Phase 2 is
-implemented on the M3 but not yet verified against a model or a granted screen
-recording permission. See `doc/phase1` and `doc/phase2` for the design
+Phases 0, 1 and 2 are implemented, and Phase 2 is now verified on the M4 Air
+against the real helpers and the real model: all four permissions granted, real
+screenshots archived with their metadata, real speech transcribed through the
+system audio tap, and CLARIFY and EXPLAIN both answering from it. Two bugs were
+found by that verification and fixed; they are the two entries at the end of
+"What was learned" below. See `doc/phase1` and `doc/phase2` for the design
 decisions and measurements, and `AGENTS.md` for the commands.
 
 What exists in the repository:
@@ -58,7 +61,7 @@ What exists in the repository:
 * `bin/rvw` (daemon) and `bin/rvwctl` (hotkey client, system python, stdlib
   only). `hammerspoon/rvw_hotkeys.lua` binds the keys and is required from
   `~/.hammerspoon/init.lua`.
-* `test/` with 62 unittest tests, run by `util/run_tests.sh`.
+* `test/` with 103 unittest tests, run by `util/run_tests.sh`.
 * `util/init_local_models.sh` installs and verifies the model stack, and
   `util/init_permissions.sh` explains, probes and reports every macOS privacy
   permission (Microphone, Audio Recording, Screen Recording, Accessibility);
@@ -124,14 +127,35 @@ What was learned, and what it changes:
    rather than answering OK, and a missing LLM model is reported at start-up
    rather than when the hotkey is pressed mid-conversation. Keep that habit:
    commands report the truth about the state they leave behind.
+12. The LM Studio endpoint does not serve the model it was asked for. Given an
+   identifier it does not serve it neither refuses nor loads anything: it answers
+   with whatever model is loaded and names that substitute in the response.
+   INTERPRET_SCREEN was therefore answered in convincing detail by the text
+   model, with nothing to say that no vision model had seen the image. `llm.py`
+   now refuses to ask anything of an identifier that is not being served, and
+   checks the answering model named in every streamed chunk. Trust nothing this
+   endpoint says about which model is involved without checking it.
+13. Verifying a probe is not the same as verifying what it probes. Whichever
+   audio probe ran second always reported its permission missing, because both
+   read one log and the previous launcher appended its exit line into the log the
+   next probe had just emptied. The permission had been granted all along and the
+   script said otherwise for days. Anything that reads a log another process is
+   still writing has to know whose line it is reading.
 
-Not yet verified on the M3: any real screenshot (the application used for the
-work had been denied Screen Recording), any hotkey at all (Hammerspoon has no
-Accessibility permission there, so commands were sent with `bin/rvwctl`),
-CLARIFY against a real model, and
-INTERPRET_SCREEN, for which no vision model is downloaded; load one under the
-identifier `meeting-vision` or set `RVW_VLM_MODEL`. The Phase 1 acceptance test
-and its swap and latency measurements are also still outstanding on the M3.
+CLARIFY is the clearest Phase 2 win so far: asked about "The least timeout on the
+coordinator" and "exponential back off", both misrecognitions, it returned "lease
+timeout" and "backoff" and said it had repaired them. EXPLAIN repairs words too,
+but a wrong repair reads exactly like a right one — it turned "write path" into
+"read path" while flagging it honestly.
+
+Not yet verified anywhere: INTERPRET_SCREEN against a real vision model, since
+none is downloaded on either machine; load one under the identifier
+`meeting-vision` or set `RVW_VLM_MODEL`. Not yet verified on the M4: the
+microphone as a transcript stream, as opposed to a helper that starts, and the
+hotkeys themselves, since every command so far has been sent with `bin/rvwctl`.
+The Phase 1 acceptance test and its swap and latency measurements are still
+outstanding on the M3, and a smaller model for the Air is still needed: EXPLAIN
+took 78 s there for a 60 s window with the model already loaded.
 
 Known rough edges: only one answer runs at a time, so a second hotkey during a
 streaming answer is refused rather than queued; continuous analysis is a plain
@@ -259,7 +283,7 @@ Air.
 
 ---
 
-# PHASE 2 — Make the MVA genuinely usable (IMPLEMENTED on m3, verification open)
+# PHASE 2 — Make the MVA genuinely usable (DONE on m3, VERIFIED on m4 except INTERPRET_SCREEN)
 
 Add only high-value functionality.
 

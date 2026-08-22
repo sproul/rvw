@@ -1,9 +1,10 @@
 PHASE 2 - A USABLE ASSISTANT: CLARIFY AND SCREENSHOTS
 =====================================================
 Written 2026-08-16 on the M3 (96 GB), before the local models were available on
-this machine. Everything below is implemented and unit tested; what could not be
-verified without a model or without the screen recording permission is listed
-under "Still to verify".
+this machine, and verified on the M4 Air on 2026-08-21 against the real helpers
+and the real model. What that verification proved, and the two bugs it found, are
+under "Verified on the M4 Air"; what is still outstanding is under "Still to
+verify".
 
 
 What is new
@@ -81,6 +82,10 @@ At start-up the assistant now also says whether a vision model is loaded. An
 absent vision model is reported as information, not as a failure: archiving
 screenshots does not need one.
 
+Neither of those two model clients trusts the endpoint to serve the model it was
+asked for, because this LM Studio build does not; see bug 2 below for what it
+does instead and what the client checks as a result.
+
 
 Permissions
 -----------
@@ -110,36 +115,97 @@ move that responsibility; a LaunchAgent is the way to stop depending on the
 launching terminal altogether, which belongs in Phase 6.
 
 
+Verified on the M4 Air, 2026-08-21
+----------------------------------
+Everything below was exercised against the real helpers and the real model, with
+speech played into the system audio tap by "say" so that the whole path from
+sound to answer was the real one.
+
+Permissions. util/init_permissions.sh now reports all four as granted:
+microphone, audio recording, screen recording, and Hammerspoon's accessibility.
+
+Screen capture. bin/screen_capture captured the frontmost window and printed the
+metadata for it; three captures in one burst produced three PNGs with distinct
+millisecond names and three complete sidecar JSON files, application, bundle id,
+window title, window id, size, bytes and both timestamps included.
+
+Recognition. Two spoken sentences became two transcript segments on the "them"
+stream within about ten seconds of being spoken.
+
+CLARIFY did the job it exists for. Whisper heard "The least timeout on the
+coordinator" and "exponential back off"; the clarification returned "lease
+timeout" and "backoff", marked both as repairs, and added two sentences of
+meaning. This is the first evidence that the shorter window and the different
+prompt earn their place beside EXPLAIN.
+
+EXPLAIN took 78 s from hotkey to finished answer for a 60 s window with the
+model already loaded, which confirms the Phase 1 finding rather than softening
+it: the 35B model is not usable live on 32 GB. It explained six terms correctly
+and repaired "right amplified" to "write amplified"; it also repaired "right
+path" to "read path" where "write path" was what had been said. Repairs are
+reported honestly but they are still guesses, and a wrong one reads exactly like
+a right one.
+
+Latency, then, remains the Air's problem, and it is a model sizing problem, not
+a Phase 2 problem.
+
+
+Two bugs this verification found
+--------------------------------
+1. Whichever audio probe ran second always reported its permission missing.
+   Both audio probes read var/log/audio_capture.launcher.log, because the
+   launcher names the log after the program and there is only one audio helper.
+   The launcher outlives its helper by the moment it takes to report the exit
+   and holds that log open for appending, so the previous launcher's "exited
+   with status 0" landed in the log the next probe had just emptied, and that
+   probe read it as its own helper's verdict. A probe now waits for the launcher
+   to record the exit before returning, which leaves the log quiet before
+   anybody empties it again. Covered by test/test_permission_probe.py, which
+   sources the script for its functions; that is what the guard around main() is
+   for, and the test truncates its copy at the bare "exit" that ends the script,
+   because sourcing that exit would end the shell.
+
+2. INTERPRET_SCREEN was answered by the text model and called it a success.
+   Asked for the identifier "meeting-vision", which nothing serves, this LM
+   Studio build neither refuses nor loads anything: it answers with whatever
+   model is loaded and names that substitute in the response. The screenshot
+   came back described in convincing detail by qwen3.6-35b-a3b, and nothing
+   anywhere said that no vision model had seen it. Confirmed directly against
+   the endpoint: a request naming "totally-nonexistent-model-xyz" was answered
+   with "model": "meeting-assistant".
+
+   The endpoint therefore cannot be trusted to serve what it was asked for, so
+   src/rvw/llm.py now checks both ends. A client that does not load on demand
+   refuses to ask anything of an identifier that is not being served, and every
+   streamed chunk carries the answering model, so a substitution is caught even
+   when the listing looked right. INTERPRET_SCREEN asks what is loaded before it
+   promises an answer, and now replies
+
+     OK screenshot saved as ....png; not interpreted: no model is loaded as
+     'meeting-vision'
+
+   which keeps the archival save, the part that matters, and stops passing one
+   model's answer off as another's.
+
+
 Still to verify
 ---------------
-1. A real screenshot. Screen Recording had already been declined for the
-   application used to write this code, so the helper correctly refused:
-
-     FAIL cannot list the shareable screen content (The user declined TCCs ...)
-
-   Grant it with util/init_permissions.sh -open, or reset the decision with
-   util/init_permissions.sh -reset, then run
-     bin/screen_capture --output /tmp/shot.png --target frontmost
-   and check the JSON it prints and that the PNG shows the frontmost window and
-   nothing else.
-
-2. CLARIFY against a real model, once mlx-community/Qwen3.6-35B-A3B-4bit has
-   finished downloading and util/init_local_models.sh has loaded it as
-   "meeting-assistant". Measure hotkey to first token and hotkey to last token,
-   and sysctl vm.swapusage before and after; the Phase 1 acceptance test on the
-   M3 is still outstanding for the same reason.
-
-3. INTERPRET_SCREEN has never spoken to a vision model: no VLM is downloaded on
-   this machine. Load one as the identifier "meeting-vision", for example an MLX
+1. INTERPRET_SCREEN against a real vision model. No VLM is downloaded on either
+   machine. Load one as the identifier "meeting-vision", for example an MLX
    Qwen3-VL build, then press ctrl-alt-cmd-S. Until then the command archives
-   the image and reports that the model is missing.
+   the image and says plainly that nothing interpreted it.
 
-4. The microphone stream, still unverified from Phase 1 as a stream, although
-   the permission itself is granted on this machine and the helper starts and
-   reports "capturing the microphone".
+2. The microphone stream as a stream, still unverified from Phase 1. The
+   permission is granted and the helper reports "capturing the microphone", but
+   no transcript has yet been produced from it; only the system stream has.
 
-5. Hammerspoon needs Accessibility before any hotkey works on the M3; today
-   every command has only ever been sent through bin/rvwctl.
+3. The hotkeys themselves. Hammerspoon has Accessibility on the M4 and
+   hammerspoon/rvw_hotkeys.lua binds all six keys, but every command in this
+   verification was sent with bin/rvwctl, which is the same dispatcher entry the
+   hotkey reaches and not the same as pressing the key.
+
+4. A smaller model on the Air, which is what the 78 s above is really asking
+   for, and the Phase 1 acceptance test on the M3.
 
 
 Rough edges
