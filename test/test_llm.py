@@ -92,6 +92,30 @@ class StreamingTest(LocalLlmTestCase):
         self.assertEqual(["thinking hard"], thoughts)
 
 
+class ReasoningSuppressionTest(LocalLlmTestCase):
+    """The reasoning model is stopped from thinking away its whole token budget by
+    prefilling a closed, empty thinking block; a model told not to is left alone."""
+
+    def sent_messages(self):
+        return self.endpoint.chat_requests[0]["messages"]
+
+    def test_a_closed_thinking_block_is_prefilled_as_the_assistant_turn(self):
+        self.collected_answer(llm.LocalLlm(model=served_identifier))
+        last = self.sent_messages()[-1]
+        self.assertEqual("assistant", last["role"])
+        self.assertEqual(config.reasoning_prefill, last["content"])
+
+    def test_the_callers_own_messages_are_left_untouched_before_the_prefill(self):
+        self.collected_answer(llm.LocalLlm(model=served_identifier))
+        self.assertEqual({"role": "user", "content": "hello"}, self.sent_messages()[0])
+
+    def test_a_model_that_does_not_suppress_reasoning_gets_no_prefill(self):
+        self.endpoint.served_models = [served_identifier, vision_identifier]
+        self.collected_answer(llm.LocalLlm(model=vision_identifier, loads_on_demand=False,
+                                           suppress_reasoning=False))
+        self.assertTrue(all(message["role"] != "assistant" for message in self.sent_messages()))
+
+
 class SubstitutedModelTest(LocalLlmTestCase):
     """A model that is not loaded must never be answered for by another one."""
 

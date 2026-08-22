@@ -38,7 +38,8 @@ class Assistant:
         self._streams = {name: CaptureStream(name, self._recognizer.submit)
                          for name in stream_names}
         self._llm = LocalLlm()
-        self._vision_llm = LocalLlm(model=config.vision_llm_model, loads_on_demand=False)
+        self._vision_llm = LocalLlm(model=config.vision_llm_model, loads_on_demand=False,
+                                    suppress_reasoning=False)
         self._meeting_index = meeting_index.MeetingIndex()
         self._index_built = False
         self._dispatcher = self._build_dispatcher()

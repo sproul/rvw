@@ -73,7 +73,15 @@
   from `src/rvw/config.py` and resolves the `lms` model key through `rvw.model_loader`, so
   the installer and the daemon cannot disagree about what to load.
 - Qwen3.6 thinks ~489 tokens before a one sentence answer and this LM Studio build ignores
-  every request level reasoning control; see the measurements in `src/rvw/config.py`.
+  every request level reasoning control; see the measurements in `src/rvw/config.py`. Left to
+  think it spends its whole token budget reasoning and returns an empty answer (measured
+  1023/1024 tokens, empty), which is what made it look unusable. `llm.py` therefore prefills a
+  closed, empty `<think></think>` block as the start of the assistant turn (`config.reasoning_prefill`),
+  which the model's chat template reads as thinking already done: measured 0 reasoning tokens and
+  a full EXPLAIN answer in ~5s, streaming included. The vision model is built with
+  `suppress_reasoning=False`. One rough edge: CLARIFY, which asks the model to deliberate over
+  word choices, moves that deliberation into the visible answer now that the thinking channel is
+  closed, and rambles; its prompt still needs tightening.
 - `INTERPRET_SCREEN` needs a vision model loaded as `meeting-vision`; override with
   `RVW_VLM_MODEL`. Everything else works without it. Without one it archives the image
   and replies `not interpreted: no model is loaded as 'meeting-vision'`.

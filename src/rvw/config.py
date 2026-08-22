@@ -89,6 +89,18 @@ vision_llm_model = os.environ.get("RVW_VLM_MODEL", "meeting-vision")
 # thinking is only a latency cost, because llm.py keeps reasoning tokens out of
 # the answer, and a per model reasoning setting in the LM Studio UI would be
 # applied at load time rather than from here.
+#
+# That latency is not small, though: measured on the M3 Max on 2026-08-22, the
+# real EXPLAIN prompt with thinking left on spent all 1023 of its 1024 allowed
+# tokens on reasoning and returned an empty answer, which is the timeout that made
+# the model look unusable. The one lever that does work is not a request
+# parameter at all: prefilling a closed, empty thinking block as the start of the
+# assistant turn makes the model skip thinking and answer directly, measured at
+# zero reasoning tokens and a full, good answer in about five seconds, streaming
+# included. It works because the model's own chat template treats a supplied
+# </think> as thinking already done, so no engine support is needed. llm.py
+# appends this to the messages of a model asked to suppress reasoning.
+reasoning_prefill = "<think>\n\n</think>\n\n"
 
 # Loading the LLM on demand. llm_model above is the identifier LM Studio serves
 # the model under; llm_source_model is the model loaded under that identifier.

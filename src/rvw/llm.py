@@ -22,13 +22,18 @@ class LocalLlm:
     """Streaming chat client for the local OpenAI compatible server."""
 
     def __init__(self, base_url=config.llm_base_url, model=config.llm_model,
-                 loads_on_demand=True):
+                 loads_on_demand=True, suppress_reasoning=True):
         self._base_url = base_url.rstrip("/")
         self._model = model
         # Only the assistant's own model is loaded on demand. The vision model
         # is a different model under a different identifier, and guessing which
         # one to load for it would be worse than saying it is not there.
         self._loads_on_demand = loads_on_demand
+        # The reasoning model otherwise spends its whole budget thinking; see
+        # config.reasoning_prefill. A different model (the vision one) is left
+        # alone, because prefilling a thinking block into a model that does not
+        # use one would only confuse it.
+        self._suppress_reasoning = suppress_reasoning
 
     def available_models(self):
         try:
@@ -100,11 +105,19 @@ class LocalLlm:
                                 % (self._model, error))
 
     def _build_request(self, messages):
-        payload = {"model": self._model, "messages": messages, "stream": True,
-                   "temperature": config.llm_temperature, "max_tokens": config.llm_max_tokens}
+        payload = {"model": self._model, "messages": self._prepared_messages(messages),
+                   "stream": True, "temperature": config.llm_temperature,
+                   "max_tokens": config.llm_max_tokens}
         return urllib.request.Request(self._base_url + "/chat/completions",
                                       data=json.dumps(payload).encode("utf-8"),
                                       headers={"Content-Type": "application/json"})
+
+    def _prepared_messages(self, messages):
+        """Optionally start the assistant turn with a closed, empty thinking block,
+        which is what stops the reasoning model from thinking away its whole budget."""
+        if not self._suppress_reasoning or not config.reasoning_prefill:
+            return messages
+        return list(messages) + [{"role": "assistant", "content": config.reasoning_prefill}]
 
     @staticmethod
     def _parse_stream_line(raw_line):
