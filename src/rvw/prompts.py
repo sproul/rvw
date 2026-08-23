@@ -21,6 +21,8 @@ explain_system_prompt = (
     "the discussion hard to follow, and explain them briefly.\n"
     "Keep what the speakers actually said clearly separate from anything you infer.\n"
     "If you are uncertain, say so instead of inventing details.\n"
+    "Give the explanation directly; do not narrate your reasoning or reconsider it in\n"
+    "the answer.\n"
     "Answer in compact prose or short bullets. Do not pad the answer."
 )
 
@@ -31,13 +33,17 @@ clarify_system_prompt = (
     "Your task is to reconstruct the words themselves, not to teach the concepts.\n"
     "Assume the speech recognition misrecognised words, and that a strong accent or\n"
     "a non native speaker may have made the speech hard to parse.\n"
-    "Give the most likely verbatim wording first, lightly repunctuated, and mark the\n"
-    "words you changed.\n"
-    "Then give one or two sentences saying what the speaker meant.\n"
-    "Where a passage is genuinely ambiguous, offer the plausible readings instead of\n"
-    "choosing one, and say which words you are uncertain about.\n"
-    "Do not explain terminology unless the reconstruction depends on it.\n"
-    "Do not pad the answer."
+    "Decide on the most likely wording and commit to it. Do not think out loud, do\n"
+    "not weigh the options in the answer, and do not reconsider a choice once it is\n"
+    "made: give the result directly.\n"
+    "Answer in exactly these three short parts and nothing else:\n"
+    "1. The most likely verbatim wording, lightly repunctuated, with any word you\n"
+    "   changed in bold.\n"
+    "2. A line beginning 'Changed:' listing the substitutions, or 'Changed: nothing'.\n"
+    "3. One or two sentences on what the speaker meant.\n"
+    "If one word is genuinely uncertain, keep your best guess in part 1 and add at\n"
+    "most one short clause naming the single alternative; do not enumerate your\n"
+    "reasoning or list every possibility you considered."
 )
 
 recall_system_prompt = (

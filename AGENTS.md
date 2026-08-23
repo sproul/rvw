@@ -79,9 +79,11 @@
   closed, empty `<think></think>` block as the start of the assistant turn (`config.reasoning_prefill`),
   which the model's chat template reads as thinking already done: measured 0 reasoning tokens and
   a full EXPLAIN answer in ~5s, streaming included. The vision model is built with
-  `suppress_reasoning=False`. One rough edge: CLARIFY, which asks the model to deliberate over
-  word choices, moves that deliberation into the visible answer now that the thinking channel is
-  closed, and rambles; its prompt still needs tightening.
+  `suppress_reasoning=False`. Because the thinking channel is closed, a prompt that invites
+  deliberation makes the model deliberate in the visible answer: CLARIFY did this and rambled,
+  so its prompt was tightened to a decisive, fixed three-part format ("do not think out loud, do
+  not weigh options, do not reconsider"), verified terse over five runs on m3 (0.7-1.6s each).
+  Keep that discipline in any new prompt built for this model.
 - `INTERPRET_SCREEN` needs a vision model loaded as `meeting-vision`; override with
   `RVW_VLM_MODEL`. Everything else works without it. Without one it archives the image
   and replies `not interpreted: no model is loaded as 'meeting-vision'`.
