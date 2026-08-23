@@ -226,9 +226,12 @@ EXPLAIN, the decisive three-part CLARIFY the tightened prompt asks for, and a co
 cited one-line RECALL, with 0 reasoning tokens in every case because it is the same
 model family the reasoning suppression was built for.
 
-Adopting it needs no code change. `RVW_LLM_MODEL` and `RVW_LLM_URL` select the model
-and endpoint, and `util/init_local_models.sh andrevp/Qwen3.6-35B-A3B-3bit-MLX` loads it
-under the `meeting-assistant` identifier the app already asks for.
+Adopted on m4 as of this commit, through `config.llm_source_model_by_host`. Beware one
+thing the task brief got wrong and this file repeated: `RVW_LLM_MODEL` is *not* the
+model, it is the identifier LM Studio serves one under (`meeting-assistant`), and
+changing it renames what the assistant asks for rather than what answers. The model is
+`RVW_LLM_SOURCE_MODEL` / `config.llm_source_model`. See "Configuring this per machine"
+below for why that setting is not left to the environment.
 
 Two things to carry forward. If the machine is under heavier application load than it
 was here -- it already sits on ~10 GB of swap before any model loads -- Ling-mini-2.0
@@ -245,6 +248,49 @@ which makes LM Studio hide the half-downloaded folder from `lms ls` even after t
 files are complete. Downloading with `hf download <repo> --local-dir
 ~/.lmstudio/models/<publisher>/<repo>` and clearing the stale jobs from that file
 (with the daemon stopped) was the way through.
+
+
+## Configuring this per machine
+
+Which model to load is the one setting that has to differ from one Mac to the next,
+because it is the one the machine's memory decides. It lives in `src/rvw/config.py`:
+
+    llm_source_model_default = "mlx-community/Qwen3.6-35B-A3B-4bit"
+    llm_source_model_by_host = {
+        "m3": llm_source_model_default,               # M3 Max, 96 GB
+        "m4": "andrevp/Qwen3.6-35B-A3B-3bit-MLX",     # M4 Air, 32 GB
+    }
+    llm_source_model = resolve_llm_source_model(os.environ, socket.gethostname())
+
+so m3 keeps the 4-bit 35B and m4 loads the 3-bit quant, with no per-machine setup on
+either: the table is checked in, and each Mac recognises itself by name. The name is
+matched on its first component, lowercased, because macOS answers with `m4`, `m4.local`
+or `m4.lan` depending on the network and none of those is a different machine. A host
+that is not in the table gets `llm_source_model_default`, which is deliberately the
+4-bit model: a new machine belongs in the table only once it has rows in the results
+above, and until then it should behave the way every machine did before.
+
+Everything downstream reads that one value, so the installer and the daemon cannot
+disagree about it:
+
+- `util/init_local_models.sh` reads `llm_source_model` through
+  `util/assistant_settings.sh`, so running the installer on m4 downloads and loads the
+  3-bit model, and on m3 the 4-bit one;
+- `src/rvw/model_loader.py` reads the same value when it reloads the model on the first
+  question after the idle timeout has unloaded it.
+
+**Why this is not an environment variable.** `RVW_LLM_SOURCE_MODEL` does still override,
+which is how a candidate is tried out for one run. But it is the wrong place to *settle*
+a machine, because the daemon does not run in your shell: `bin/rvw` starts it with `open
+-n -a bin/rvw.app`, and LaunchServices gives it the launchd session's environment, never
+a shell profile's. A machine configured by an `export` would load the right model when
+you ran the installer by hand and the wrong one an hour later, when the idle timeout
+expired and the daemon loaded it again by itself -- and the symptom would be one
+mysteriously slow question, not an error.
+
+To change what a machine loads, add or edit its row. To try something for one run:
+
+    RVW_LLM_SOURCE_MODEL=mlx-community/Ling-mini-2.0-4bit util/init_local_models.sh
 
 
 ## A more elaborate scheme, if we want one

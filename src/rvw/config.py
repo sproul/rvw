@@ -6,6 +6,7 @@ than parameters threaded through the call graph.
 """
 
 import os
+import socket
 from pathlib import Path
 
 repo_dir = Path(__file__).resolve().parents[2]
@@ -115,7 +116,55 @@ reasoning_prefill = "<think>\n\n</think>\n\n"
 # which is deliberate: the assistant spends most of its life listening rather
 # than asking, and a resident twenty gigabyte model is a poor way to spend that
 # time. An unloaded model is therefore ordinary and not a fault.
-llm_source_model = os.environ.get("RVW_LLM_SOURCE_MODEL", "mlx-community/Qwen3.6-35B-A3B-4bit")
+#
+# Which model that is, is the one setting that must differ from one Mac to the
+# next, because it is the one the machine's memory decides. The 4-bit 35B is
+# 20 GB resident: comfortable on the 96 GB m3, and on the 32 GB m4 it leaves the
+# machine paging and takes 23.9 seconds to the first token of an EXPLAIN. The
+# 3-bit quant of the same MoE is 14.2 GB there, answers as well, and starts in
+# 1.2 seconds. doc/model_benchmarks.md holds those measurements and the runs of
+# every other candidate; a new machine belongs in this table only once it has
+# rows there, so the default is the model that is known to be good where there
+# is memory for it.
+#
+# The table lives here rather than in the environment because the daemon runs
+# inside bin/rvw.app, started by LaunchServices, and so inherits the launchd
+# session's variables and never a shell's. A machine configured by an export in
+# a shell profile would load the right model when the installer was run by hand
+# and the wrong one an hour later, when the idle timeout expired and the daemon
+# loaded it again by itself. RVW_LLM_SOURCE_MODEL still overrides, for trying a
+# candidate out; to change what a machine does permanently, add its row.
+llm_source_model_default = "mlx-community/Qwen3.6-35B-A3B-4bit"
+llm_source_model_by_host = {
+    "m3": llm_source_model_default,                  # M3 Max, 96 GB: 20 GB resident is comfortable
+    "m4": "andrevp/Qwen3.6-35B-A3B-3bit-MLX",        # M4 Air, 32 GB: the 4-bit swaps, this fits in 14.2 GB
+}
+
+
+def short_host_name(host_name):
+    """The machine's own name, without whatever domain the network appended.
+
+    macOS answers gethostname() with m4, m4.local or m4.lan depending on where
+    it is plugged in, and none of those is a different machine.
+    """
+    return host_name.strip().split(".")[0].lower()
+
+
+def source_model_for_host(host_name):
+    """The model this machine has the memory for; see llm_source_model_by_host."""
+    return llm_source_model_by_host.get(short_host_name(host_name), llm_source_model_default)
+
+
+def resolve_llm_source_model(environment, host_name):
+    """RVW_LLM_SOURCE_MODEL if it names one, otherwise what the machine can run.
+
+    Set-but-empty counts as saying nothing, because that is how an unset
+    variable arrives from a launchd plist.
+    """
+    return environment.get("RVW_LLM_SOURCE_MODEL") or source_model_for_host(host_name)
+
+
+llm_source_model = resolve_llm_source_model(os.environ, socket.gethostname())
 llm_context_length = 32768
 llm_idle_ttl_seconds = 3600
 llm_load_timeout_seconds = 900.0        # loading 20 GB from a cold page cache is not quick

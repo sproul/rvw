@@ -15,10 +15,24 @@ import unittest
 
 from rvw import config, model_loader
 
+# Every model any machine's config.llm_source_model_by_host names, because these
+# tests run on all of them and each one loads the model its own memory affords.
 listing_of_downloaded_models = json.dumps([
     {"modelKey": "text-embedding-nomic-embed-text-v1.5", "path": "nomic/embed"},
     {"modelKey": "qwen3.6-35b-a3b", "path": "mlx-community/Qwen3.6-35B-A3B-4bit"},
+    {"modelKey": "qwen3.6-35b-a3b-mlx", "path": "andrevp/Qwen3.6-35B-A3B-3bit-MLX"},
 ])
+
+
+def model_key_of_the_configured_source_model():
+    """What this machine's model is called in the listing above.
+
+    Spelled out rather than resolved, so that a test of the load command is not
+    checked against the very function that builds it.
+    """
+    keys_by_repo_id = {"mlx-community/Qwen3.6-35B-A3B-4bit": "qwen3.6-35b-a3b",
+                       "andrevp/Qwen3.6-35B-A3B-3bit-MLX": "qwen3.6-35b-a3b-mlx"}
+    return keys_by_repo_id[config.llm_source_model]
 
 
 class RecordingLms:
@@ -86,7 +100,7 @@ class LoadOnDemandTest(ModelLoaderTestCase):
         self.assertTrue(model_loader.ensure_the_configured_model_is_loaded([]))
         self.assertEqual(1, len(self.lms.load_commands))
         command = self.lms.load_commands[0]
-        self.assertIn("qwen3.6-35b-a3b", command)
+        self.assertIn(model_key_of_the_configured_source_model(), command)
         self.assertIn("--identifier", command)
         self.assertIn(config.llm_model, command)
 

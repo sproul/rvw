@@ -49,7 +49,17 @@
 ## Notes
 - The venv is `.venv` at the repo root, python 3.12 arm64; MLX needs arm64 throughout.
 - The LLM is reached at `http://127.0.0.1:1234/v1` under the identifier
-  `meeting-assistant`; override with `RVW_LLM_MODEL` and `RVW_LLM_URL`.
+  `meeting-assistant`; override with `RVW_LLM_MODEL` and `RVW_LLM_URL`. Those name the
+  identifier and the endpoint, not the model: the model loaded under that identifier is
+  `config.llm_source_model` / `RVW_LLM_SOURCE_MODEL`.
+- Which model that is differs per machine, because the machine's memory decides it:
+  `config.llm_source_model_by_host` gives m3 (96 GB) the 4-bit Qwen3.6-35B-A3B and m4
+  (32 GB) the 3-bit quant of it, matching on the hostname's first component, with
+  `llm_source_model_default` for a machine not in the table. Measurements and the
+  reasoning are in `doc/model_benchmarks.md`; add a machine's row only once it has
+  rows there. Do not settle this per machine with an exported variable: the daemon runs
+  inside `bin/rvw.app` under LaunchServices and never sees a shell's environment, so an
+  export would configure the installer and not the reload after the idle timeout.
 - The LM Studio server does not survive a reboot: `lms server` has no boot option and the
   installer starts it once. Nothing looks wrong afterwards, because the assistant still
   listens and transcribes and only a question finds the endpoint gone, so the LaunchAgent
