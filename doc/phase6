@@ -1,0 +1,116 @@
+# Phase 6 - single Mac polished operation, first step: the menu bar
+
+Built 2026-08-22 on the M3. Verified against the running daemon and the running
+Hammerspoon the same evening.
+
+## The smallest goal
+
+A convenient way to see and change what the assistant is doing, without a
+terminal and without a window that could appear in a screen share.
+
+Chosen deliberately narrow: a menu bar item in Hammerspoon. Hammerspoon is
+already installed, already owns the hotkeys and already holds the Accessibility
+grant, so this adds no application, no bundle, no permission and no dependency.
+The alternative considered was a permission free Swift bundle whose windows set
+`NSWindow.sharingType = .none`, which is the only way to make a *window*
+genuinely invisible to ScreenCaptureKit. That is the right answer for the
+transcript and answer windows and is deliberately left for later: this step adds
+no window at all, so it does not need it.
+
+Not built, and still open from the phase list: the rolling transcript window, the
+answer window (answers still stream into the assistant's own terminal), model
+selection (the identifier is fixed and switching the model behind it is Phase 8
+work) and language/profile selection (Phase 5 does not exist yet, so there is
+nothing to select).
+
+## What was added
+
+`STATUS_FIELDS`, one new dispatcher command. The menu bar reads the session state
+several times a minute and cannot read the prose of `STATUS`: that wording is
+written for a person, and improving it would silently break the indicator. Both
+commands render one description of the session (`Assistant._status_fields`), so
+they cannot disagree:
+
+    OK capture=none continuous=off meeting=2026-08-22_22.13 model=meeting-assistant
+       retention=ephemeral segments=0 streams=system vision_model=meeting-vision
+
+A value containing a space would turn one field into two for the reader, and the
+model identifiers come from the environment, so `require_space_free_field_values`
+refuses to report one rather than emitting something that parses wrongly.
+
+The Hammerspoon side was split, because one file could no longer be both the
+configuration and the mechanism:
+
+* `rvw_config.lua`  what the keys and the menu do; the only file to edit.
+* `rvw_state.lua`   pure: parse a status reply, decide the title, decide whether
+                    anything may be drawn. No hs API at all, which is what makes
+                    it testable.
+* `rvw_client.lua`  one command, or a sequence, through `bin/rvwctl`.
+* `rvw_presenting.lua` whether this screen is being shown to other people.
+* `rvw_actions.lua` run one configured entry and report it, for hotkeys and menu
+                    items alike, so the two cannot drift apart.
+* `rvw_menu.lua`    the menu bar item; the menu is built when it is opened.
+* `rvw_hotkeys.lua` the entry point required from `~/.hammerspoon/init.lua`,
+                    unchanged in name so the existing installation still works.
+
+The title is the recording indicator, ASCII and small: `rvw -` idle, `rvw L`
+listening, `R` keeping the transcript, `A` analysing continuously, `P`
+presenting, and `rvw x` for no assistant at all, which must not look like an idle
+one.
+
+## Screen sharing
+
+The rule from Phase 2 was that a screenshot must be silent. Phase 6 generalises
+it: presenting mode (alt-cmd-P, or the menu) suppresses every alert, failures
+included. While the screen is shared, an alert explaining why a screenshot failed
+is worse than the failure, and it is the audience that reads it first. Turning
+presenting *on* is therefore itself silent; turning it off is not.
+
+Recognising a share automatically is best effort and always will be: a Meet or
+Teams share inside a browser tab is indistinguishable from the tab. Zoom does
+open a window of its own, and `rvw_config.sharing_windows` lists the titles that
+mean it is sharing. Detection can only add certainty, never remove it: a manual
+"I am presenting" is never overridden by a failure to find a sharing window, and
+the menu item is disabled while a share is detected so that it cannot be turned
+off by accident.
+
+No window is created by any of this, which is the substantive answer to the
+warning in the phase description. There is nothing that can appear in shared
+material because there is nothing to appear.
+
+## Tests
+
+`test/test_menu_bar.py`, 20 tests, and `StatusFieldsTest` in
+`test/test_assistant.py`, 7 more. Two kinds:
+
+1. Static, always run: every command named in any lua file is a command the
+   dispatcher registers (a menu item naming a renamed command would otherwise
+   fail only when pressed, mid-conversation); every hotkey names a command or a
+   local action and describes itself; the lua is plain ASCII.
+2. Behavioural, through Hammerspoon's own lua: there is no standalone lua on
+   these machines, so `test/lua_testing.py` evaluates the pure modules with
+   `hs -c` and skips if Hammerspoon is not running. This covers the title, the
+   status parsing, the whole menu built for a live session, an idle one and no
+   session at all, and the alert policy.
+
+Everything that actually calls hs (the alerts, the bindings, the menu bar item)
+is left to manual verification.
+
+## Verified on the M3, 2026-08-22
+
+* `util/run_tests.sh`: 238 tests, all pass.
+* Hammerspoon reloaded: eight hotkeys bound, the menu bar item appears, and the
+  menu of a dead assistant reads "the assistant is not running" rather than
+  failing.
+* With the daemon running: `STATUS_FIELDS` answered as above, the menu summary
+  line showed the live session and its meeting directory, `TOGGLE_RETENTION`
+  moved the title to `rvw R`, and the presenting toggle moved it to `rvw RP`.
+
+## Still rough
+
+* The menu polls with one `rvwctl` run every five seconds, which is a system
+  python start each time. Cheap, but it is polling.
+* Model and language selection are absent, for the reasons above.
+* Answers still appear only in the assistant's terminal, so the terminal is still
+  the thing that must be kept off a shared screen.
+* Automatic share detection covers Zoom's own share window and nothing else.

@@ -150,6 +150,7 @@ class Assistant:
                               ("START_CAPTURE", self._command_start_capture),
                               ("START_RETAINING", self._command_start_retaining),
                               ("STATUS", self._command_status),
+                              ("STATUS_FIELDS", self._command_status_fields),
                               ("STOP_CAPTURE", self._command_stop_capture),
                               ("STOP_RETAINING", self._command_stop_retaining),
                               ("TOGGLE_CAPTURE", self._command_toggle_capture),
@@ -289,12 +290,36 @@ class Assistant:
     # -- status and shutdown -----------------------------------------------
 
     def _command_status(self, arguments):
-        running = [name for name, stream in self._streams.items() if stream.is_running]
-        return "capture: %s; continuous: %s; transcript segments: %d; retention: %s" % (
-            ", ".join(running) or "idle",
-            "on" if self._continuous_analysis.is_set() else "off",
-            self._transcript.segment_count,
+        """The session state in prose, for a person reading a reply."""
+        fields = self._status_fields()
+        return "capture: %s; continuous: %s; transcript segments: %s; retention: %s" % (
+            fields["capture"], fields["continuous"], fields["segments"],
             self._archive.describe_state())
+
+    def _command_status_fields(self, arguments):
+        """The same state as key=value pairs, for the menu bar that polls it.
+
+        The menu bar needs the state several times a minute and must not read the
+        prose above: that wording is written for a person and improving it would
+        break the indicator.
+        """
+        fields = self._status_fields()
+        require_space_free_field_values(fields)
+        return " ".join("%s=%s" % pair for pair in sorted(fields.items()))
+
+    def _status_fields(self):
+        """One description of the session, rendered by both STATUS commands."""
+        return {"capture": ",".join(self._running_stream_names()) or "none",
+                "continuous": "on" if self._continuous_analysis.is_set() else "off",
+                "meeting": self._archive.directory.name,
+                "model": config.llm_model,
+                "retention": "retained" if self._archive.is_retaining else "ephemeral",
+                "segments": str(self._transcript.segment_count),
+                "streams": ",".join(self._streams),
+                "vision_model": config.vision_llm_model}
+
+    def _running_stream_names(self):
+        return [name for name, stream in self._streams.items() if stream.is_running]
 
     def _command_quit(self, arguments):
         self._quit_requested.set()
@@ -373,6 +398,18 @@ class Assistant:
     def _write_token(token):
         sys.stdout.write(token)
         sys.stdout.flush()
+
+
+def require_space_free_field_values(fields):
+    """A space in a value would silently turn one field into two for the reader.
+
+    The model identifiers come from the environment, so this is reachable by a
+    typo in RVW_LLM_MODEL rather than only by a bug here.
+    """
+    offending = sorted(name for name, value in fields.items() if " " in value)
+    if offending:
+        raise ValueError("status field value(s) contain a space and cannot be reported as "
+                         "key=value: %s" % ", ".join(offending))
 
 
 def parse_arguments(argv):

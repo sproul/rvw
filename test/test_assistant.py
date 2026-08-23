@@ -19,8 +19,8 @@ from rvw.transcript import TranscriptSegment
 
 expected_commands = ["CLARIFY", "EXPLAIN", "INTERPRET_SCREEN", "QUIT", "RECALL", "REINDEX",
                      "SCREENSHOT", "SEARCH", "START_CAPTURE", "START_RETAINING", "STATUS",
-                     "STOP_CAPTURE", "STOP_RETAINING", "TOGGLE_CAPTURE", "TOGGLE_CONTINUOUS",
-                     "TOGGLE_RETENTION"]
+                     "STATUS_FIELDS", "STOP_CAPTURE", "STOP_RETAINING", "TOGGLE_CAPTURE",
+                     "TOGGLE_CONTINUOUS", "TOGGLE_RETENTION"]
 
 stub_helper = """#!/bin/sh
 output=""
@@ -111,6 +111,54 @@ class RegisteredCommandsTest(AssistantCommandTestCase):
 
     def test_every_command_up_to_phase_3_is_registered(self):
         self.assertEqual(expected_commands, self.assistant._dispatcher.command_names())
+
+
+class StatusFieldsTest(AssistantCommandTestCase):
+    """The menu bar polls the session state several times a minute and cannot read
+    prose: STATUS is written for a person and would break the menu the moment its
+    wording improved. STATUS_FIELDS is the same state as key=value pairs."""
+
+    def fields(self):
+        reply = self.dispatch("STATUS_FIELDS")
+        self.assertTrue(reply.startswith("OK "), reply)
+        return dict(pair.split("=", 1) for pair in reply[len("OK "):].split())
+
+    def test_a_new_session_is_idle_ephemeral_and_empty(self):
+        fields = self.fields()
+        self.assertEqual("none", fields["capture"])
+        self.assertEqual("off", fields["continuous"])
+        self.assertEqual("ephemeral", fields["retention"])
+        self.assertEqual("0", fields["segments"])
+
+    def test_the_available_streams_are_reported_so_the_menu_can_offer_them(self):
+        self.assertEqual("system", self.fields()["streams"])
+
+    def test_retention_and_the_utterance_count_follow_the_session(self):
+        self.dispatch("START_RETAINING")
+        self.add_speech("one utterance")
+        fields = self.fields()
+        self.assertEqual("retained", fields["retention"])
+        self.assertEqual("1", fields["segments"])
+
+    def test_the_meeting_and_the_models_are_named(self):
+        fields = self.fields()
+        self.assertEqual(self.assistant._archive.directory.name, fields["meeting"])
+        self.assertEqual(config.llm_model, fields["model"])
+        self.assertEqual(config.vision_llm_model, fields["vision_model"])
+
+    def test_a_value_with_a_space_is_refused_rather_than_read_as_two_fields(self):
+        """RVW_LLM_MODEL is whatever the environment said it was; a value with a
+        space in it would silently turn one field into two for the reader."""
+        saved = config.llm_model
+        config.llm_model = "two words"
+        self.addCleanup(setattr, config, "llm_model", saved)
+        self.assertTrue(self.dispatch("STATUS_FIELDS").startswith("FAIL "))
+
+    def test_the_prose_status_still_describes_the_same_session(self):
+        self.dispatch("START_RETAINING")
+        reply = self.dispatch("STATUS")
+        self.assertIn("retained", reply)
+        self.assertIn("continuous: off", reply)
 
 
 class TranscriptRetentionTest(AssistantCommandTestCase):

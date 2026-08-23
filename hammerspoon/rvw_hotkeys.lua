@@ -1,54 +1,32 @@
--- Global hotkeys for the local listening assistant.
+-- The user interface of the local listening assistant: global hotkeys and a menu
+-- bar item.
 --
--- Hammerspoon owns the hotkeys so that the assistant itself needs no
--- accessibility permission, and so the same key can later drive an assistant
--- running on the companion Mac. Each hotkey sends one command through rvwctl.
+-- Hammerspoon owns them so that the assistant itself needs no accessibility
+-- permission, and so the same keys can later drive an assistant running on the
+-- companion Mac: everything here goes through rvwctl and knows nothing else
+-- about the daemon. What the keys and the menu do is in rvw_config.lua.
 --
 -- Install by adding these two lines to ~/.hammerspoon/init.lua:
 --   package.path = os.getenv("HOME") .. "/dp/git/rvw/hammerspoon/?.lua;" .. package.path
 --   require("rvw_hotkeys")
 
-local module_dir = debug.getinfo(1, "S").source:sub(2):match("(.*)/")
-local rvwctl = module_dir:gsub("/hammerspoon$", "") .. "/bin/rvwctl"
+local actions = require("rvw_actions")
+local config = require("rvw_config")
+local menu = require("rvw_menu")
 
-local mods = {"alt", "cmd"}
-local mods_with_ctrl = {"ctrl", "alt", "cmd"}
+local bound_hotkeys = {}
 
--- hs.execute is synchronous, so the capture is already finished before any alert
--- is drawn and the alert can never appear in the saved image.
-local function send_command(command, silent_on_success)
-  local output, succeeded = hs.execute(rvwctl .. " " .. command)
-  local reply = (output or ""):gsub("%s+$", "")
-  if not succeeded and reply == "" then
-    reply = "FAIL could not run " .. rvwctl
-  end
-  if silent_on_success and reply:sub(1, 3) == "OK " then
-    return
-  end
-  hs.alert.show(reply, 2)
+local function bind(entry)
+  return hs.hotkey.bind(entry.mods, entry.key, function()
+    actions.run(entry)
+    menu.refresh()
+  end)
 end
 
-local function command_sender(command)
-  return function() send_command(command, false) end
+for _, entry in ipairs(config.hotkeys) do
+  table.insert(bound_hotkeys, bind(entry))
 end
 
--- The screenshot actions say nothing when they succeed: an alert would be
--- visible to everyone I am sharing my screen with.
-local function silent_command_sender(command)
-  return function() send_command(command, true) end
-end
+menu.start()
 
-hs.hotkey.bind(mods, "r", command_sender("TOGGLE_CAPTURE"))
-hs.hotkey.bind(mods_with_ctrl, "r", command_sender("TOGGLE_CONTINUOUS"))
-hs.hotkey.bind(mods, "e", command_sender("EXPLAIN"))
-hs.hotkey.bind(mods, "c", command_sender("CLARIFY"))
-hs.hotkey.bind(mods, "s", silent_command_sender("SCREENSHOT"))
-hs.hotkey.bind(mods_with_ctrl, "s", silent_command_sender("INTERPRET_SCREEN"))
-
--- Retention is the one state worth an alert even while sharing a screen: whether
--- this conversation is being kept is not something to be unsure about.
-hs.hotkey.bind(mods, "t", command_sender("TOGGLE_RETENTION"))
-
-hs.alert.show("OK rvw hotkeys: alt-cmd-R capture, ctrl-alt-cmd-R analyse, alt-cmd-E explain, "
-  .. "alt-cmd-C clarify, alt-cmd-S screenshot, ctrl-alt-cmd-S screenshot and interpret, "
-  .. "alt-cmd-T keep or stop keeping the transcript")
+return {hotkeys = bound_hotkeys, menu = menu}

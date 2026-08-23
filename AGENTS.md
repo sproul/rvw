@@ -8,7 +8,12 @@
 - `bin/rvw` daemon launcher, `bin/rvwctl` hotkey client (system python, stdlib only)
 - `helper/rvw_launcher.swift` + `helper/rvw_app.plist` built by `helper/build_app.sh` into
   `bin/rvw.app`, the bundle that owns the macOS permissions
-- `hammerspoon/rvw_hotkeys.lua` global hotkeys, required from `~/.hammerspoon/init.lua`
+- `hammerspoon/` the user interface: `rvw_hotkeys.lua` is the entry point required from
+  `~/.hammerspoon/init.lua` and binds the keys; `rvw_menu.lua` is the menu bar item;
+  `rvw_config.lua` is what the keys and the menu do and the only file to edit;
+  `rvw_state.lua` is pure (no hs API) and holds the title and alert decisions;
+  `rvw_client.lua` talks to the daemon through `bin/rvwctl`; `rvw_presenting.lua` knows
+  whether this screen is being shared; `rvw_actions.lua` runs one entry for both
 - `doc/` phase reports and model reasoning, `prompts/` the specification
 - `var/meetings/YYYY/MM/YYYY-MM-DD_HH.MM/` everything one session keeps:
   `transcript.jsonl` and `metadata.json`, `transcript.md` rendered from the JSONL, and
@@ -32,7 +37,7 @@
 - Run the tests: `util/run_tests.sh` (unittest, no pytest in the venv)
 - Run the assistant: `bin/rvw [--source mic|system|both] [--listen] [--debug]`, which starts it
   inside `bin/rvw.app`; `bin/rvw -here ...` runs it in this terminal instead
-- Send a command: `bin/rvwctl EXPLAIN|CLARIFY|SCREENSHOT|INTERPRET_SCREEN|SEARCH|RECALL|REINDEX|TOGGLE_CAPTURE|TOGGLE_CONTINUOUS|START_RETAINING|STOP_RETAINING|TOGGLE_RETENTION|STATUS|QUIT`
+- Send a command: `bin/rvwctl EXPLAIN|CLARIFY|SCREENSHOT|INTERPRET_SCREEN|SEARCH|RECALL|REINDEX|TOGGLE_CAPTURE|TOGGLE_CONTINUOUS|START_RETAINING|STOP_RETAINING|TOGGLE_RETENTION|STATUS|STATUS_FIELDS|QUIT`
   (`SEARCH <words>` and `RECALL <question>` take free text, e.g. `bin/rvwctl RECALL what did they say about reconnect behavior`)
 - Take one screenshot by hand: `bin/screen_capture --output /tmp/shot.png --target frontmost`
 
@@ -104,5 +109,22 @@
   pinned to the launcher's cdhash. `helper/rvw_launcher.swift` is therefore meant to stay
   frozen, and `helper/build_app.sh` rebuilds only when its sources actually change.
   Rebuilding the daemon or either capture helper costs nothing.
-- After editing `hammerspoon/rvw_hotkeys.lua`, reload with `hs -c 'hs.reload()'`.
+- After editing anything in `hammerspoon/`, reload with `hs -c 'hs.reload()'`.
+- The menu bar title is the recording indicator: `rvw -` idle, `rvw L` listening, `R`
+  keeping the transcript, `A` analysing continuously, `P` presenting, `rvw x` no assistant
+  running at all. It is refreshed every `config.status_poll_seconds` by one `STATUS_FIELDS`
+  call. `STATUS` is prose for a person and `STATUS_FIELDS` is the same state as key=value
+  pairs; both are rendered from `Assistant._status_fields`, so keep them that way rather
+  than parsing the prose anywhere.
+- Presenting mode (alt-cmd-P, or the menu) suppresses every alert, failures included:
+  while the screen is shared the audience reads them before I do. Turning it on is
+  therefore silent; turning it off is not. Automatic share detection is best effort and
+  only recognises Zoom's own share window (`config.sharing_windows`); it can add certainty
+  but never remove a manual "I am presenting". Phase 6 deliberately creates no window at
+  all, which is why nothing can appear in shared material; a later transcript or answer
+  window will need `NSWindow.sharingType = .none` and cannot be a Hammerspoon canvas.
+- The lua is tested two ways (`test/test_menu_bar.py`): statically, that every command it
+  names is one the dispatcher registers, and behaviourally, by evaluating the pure modules
+  in the running Hammerspoon with `hs -c` (`test/lua_testing.py`, skipped if it is not
+  running). There is no standalone lua on these machines.
 - Tuning knobs (silence threshold, window lengths, models) are all in `src/rvw/config.py`.

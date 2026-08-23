@@ -29,9 +29,22 @@ The system should eventually choose appropriately sized local models for each ma
 9. Every phase should end in something runnable and testable.
 10. Prefer a CLI or minimal menu-bar utility over a sophisticated GUI until the core system proves useful.
 
-# CURRENT STATE — updated 2026-08-21 after Phase 4, and verifying Phase 2 (m4) and Phase 3 (m3)
+# CURRENT STATE — updated 2026-08-22 after the first step of Phase 6
 
-Phases 0 to 4 are implemented. Phase 4, searchable meeting memory, was built on
+Phases 0 to 4 are implemented, and the menu bar half of Phase 6 was built and
+verified on the M3 on 2026-08-22: a Hammerspoon menu bar item whose title is the
+recording indicator (`rvw L` listening, `R` retaining, `A` analysing, `P`
+presenting, `rvw x` no assistant), source selection, the retention and continuous
+toggles, every action, the hotkey list, and presenting mode — one switch that
+suppresses every alert, failures included, because on a shared screen the
+audience reads them first. It reads one new dispatcher command, `STATUS_FIELDS`,
+because the prose of `STATUS` is written for a person. No window is created by any
+of it, which is the answer to the phase's warning; the transcript and answer
+windows are deliberately still to come and will need `NSWindow.sharingType =
+.none`. Phase 5 is untouched, so there are no language profiles to select yet.
+See `doc/phase6`.
+
+Phases 0 to 4 in detail. Phase 4, searchable meeting memory, was built on
 2026-08-21: a SQLite FTS5 index over the retained transcripts, rebuildable from
 them and never synchronised between Macs, with SEARCH, RECALL (retrieval
 augmented, cited) and REINDEX. It was verified end to end against a synthetic
@@ -76,9 +89,12 @@ What exists in the repository:
   (formatting retrieved passages for the model and for me),
   `session_log`, `config`, `assistant`.
 * `bin/rvw` (daemon) and `bin/rvwctl` (hotkey client, system python, stdlib
-  only). `hammerspoon/rvw_hotkeys.lua` binds the keys and is required from
-  `~/.hammerspoon/init.lua`.
-* `test/` with 165 unittest tests, run by `util/run_tests.sh`.
+  only). `hammerspoon/` holds the user interface: `rvw_hotkeys.lua` is the entry
+  point required from `~/.hammerspoon/init.lua`, `rvw_menu.lua` the menu bar item,
+  `rvw_config.lua` what the keys and the menu do, `rvw_state.lua` the pure title
+  and alert decisions, `rvw_client.lua` the rvwctl calls, `rvw_presenting.lua`
+  whether the screen is being shared, `rvw_actions.lua` one entry run for both.
+* `test/` with 238 unittest tests, run by `util/run_tests.sh`.
 * `util/init_local_models.sh` installs and verifies the model stack, and
   `util/init_permissions.sh` explains, probes and reports every macOS privacy
   permission (Microphone, Audio Recording, Screen Recording, Accessibility);
@@ -92,11 +108,12 @@ Commands understood today: `EXPLAIN [seconds]`, `CLARIFY [seconds]`,
 `SCREENSHOT`, `INTERPRET_SCREEN [seconds]`, `SEARCH <words>`, `RECALL <question>`,
 `REINDEX`, `START_CAPTURE [streams]`,
 `STOP_CAPTURE`, `TOGGLE_CAPTURE`, `TOGGLE_CONTINUOUS`, `START_RETAINING`,
-`STOP_RETAINING`, `TOGGLE_RETENTION`, `STATUS`, `QUIT`.
-Hotkeys today: alt-cmd-R capture, ctrl-alt-cmd-R capture and analyse,
+`STOP_RETAINING`, `TOGGLE_RETENTION`, `STATUS`, `STATUS_FIELDS`, `QUIT`.
+Hotkeys today, all declared in one table in `hammerspoon/rvw_config.lua`:
+alt-cmd-R capture, ctrl-alt-cmd-R capture and analyse,
 alt-cmd-E explain the last 60 seconds, alt-cmd-C clarify the last 45 seconds,
 alt-cmd-S screenshot, ctrl-alt-cmd-S screenshot and interpret, alt-cmd-T keep or
-stop keeping the transcript.
+stop keeping the transcript, alt-cmd-P presenting (draw nothing on this screen).
 
 One session archives everything it keeps in
 `var/meetings/YYYY/MM/YYYY-MM-DD_HH.MM/`: `transcript.jsonl` while retention is
@@ -166,6 +183,21 @@ What was learned, and what it changes:
    next probe had just emptied. The permission had been granted all along and the
    script said otherwise for days. Anything that reads a log another process is
    still writing has to know whose line it is reading.
+14. A user interface that polls has to be given something to poll. STATUS is
+   prose written for a person, and a menu bar reading it would break the next time
+   the wording improved, so `STATUS_FIELDS` reports the same state as key=value
+   pairs and both are rendered from one description of the session. Give any new
+   reader its own machine readable command rather than parsing a sentence.
+15. Silence during a screen share is now one switch rather than a property of
+   individual actions: presenting mode suppresses every alert, failures included,
+   because the audience reads them before I do, and turning it on is therefore
+   itself silent. Automatic detection of a share is best effort and always will be
+   — a Meet or Teams share inside a browser tab is indistinguishable from the tab
+   — so detection may add certainty and must never override a manual "I am
+   presenting". The menu bar creates no window at all, which is why nothing can
+   appear in shared material; the transcript and answer windows of the rest of
+   Phase 6 will need `NSWindow.sharingType = .none` and therefore cannot be
+   Hammerspoon canvases.
 
 CLARIFY is the clearest Phase 2 win so far: asked about "The least timeout on the
 coordinator" and "exponential back off", both misrecognitions, it returned "lease
@@ -506,7 +538,7 @@ Do not implement external lookup until the local system is solid.
 
 ---
 
-# PHASE 6 — Single-Mac polished operation
+# PHASE 6 — Single-Mac polished operation (menu bar DONE and VERIFIED on m3; windows, model and profile selection still open)
 
 Turn the prototype into a convenient Mac utility.
 
