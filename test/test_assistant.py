@@ -17,10 +17,11 @@ from rvw.assistant import Assistant
 from rvw.llm import LocalLlmError
 from rvw.transcript import TranscriptSegment
 
-expected_commands = ["CLARIFY", "EXPLAIN", "INTERPRET_SCREEN", "QUIT", "RECALL", "REINDEX",
-                     "SCREENSHOT", "SEARCH", "START_CAPTURE", "START_RETAINING", "STATUS",
-                     "STATUS_FIELDS", "STOP_CAPTURE", "STOP_RETAINING", "TOGGLE_CAPTURE",
-                     "TOGGLE_CONTINUOUS", "TOGGLE_RETENTION"]
+expected_commands = ["ANSWER", "CLARIFY", "EXPLAIN", "INTERPRET_SCREEN", "MODELS", "QUIT",
+                     "RECALL", "REINDEX", "SCREENSHOT", "SEARCH", "SET_LANGUAGE", "SET_MODEL",
+                     "START_CAPTURE", "START_RETAINING", "STATUS", "STATUS_FIELDS",
+                     "STOP_CAPTURE", "STOP_RETAINING", "TOGGLE_CAPTURE", "TOGGLE_CONTINUOUS",
+                     "TOGGLE_RETENTION", "TRANSCRIPT"]
 
 stub_helper = """#!/bin/sh
 output=""
@@ -40,6 +41,7 @@ class RecordingLlm:
 
     def __init__(self):
         self.requests = []
+        self.model = config.llm_model
         self.served_models = [config.llm_model, config.vision_llm_model]
         self.raise_on_available_models = False
 
@@ -149,9 +151,7 @@ class StatusFieldsTest(AssistantCommandTestCase):
     def test_a_value_with_a_space_is_refused_rather_than_read_as_two_fields(self):
         """RVW_LLM_MODEL is whatever the environment said it was; a value with a
         space in it would silently turn one field into two for the reader."""
-        saved = config.llm_model
-        config.llm_model = "two words"
-        self.addCleanup(setattr, config, "llm_model", saved)
+        self.llm.model = "two words"
         self.assertTrue(self.dispatch("STATUS_FIELDS").startswith("FAIL "))
 
     def test_the_prose_status_still_describes_the_same_session(self):
@@ -159,6 +159,96 @@ class StatusFieldsTest(AssistantCommandTestCase):
         reply = self.dispatch("STATUS")
         self.assertIn("retained", reply)
         self.assertIn("continuous: off", reply)
+
+
+class TranscriptCommandTest(AssistantCommandTestCase):
+    """The rolling transcript, for the window that shows it while a meeting runs."""
+
+    def test_the_recent_speech_is_returned_under_a_heading(self):
+        self.add_speech("the lease timeout was thirty seconds")
+        reply = self.dispatch("TRANSCRIPT")
+        heading, body = reply.split("\n", 1)
+        self.assertTrue(heading.startswith("OK "), reply)
+        self.assertIn("lease timeout", body)
+
+    def test_an_explicit_window_length_is_honoured(self):
+        self.add_speech("said a moment ago")
+        self.assertIn("said a moment ago", self.dispatch("TRANSCRIPT 300"))
+
+    def test_a_silent_session_says_so_instead_of_returning_nothing(self):
+        self.assertIn("nothing has been transcribed", self.dispatch("TRANSCRIPT"))
+
+    def test_speech_older_than_the_window_is_not_returned(self):
+        self.add_speech("recent")
+        self.assertNotIn("recent", self.dispatch("TRANSCRIPT 0"))
+
+
+class AnswerCommandTest(AssistantCommandTestCase):
+    """The answer window polls this, so it has to work before, during and after."""
+
+    def test_nothing_has_been_asked_yet(self):
+        self.assertIn("nothing has been asked", self.dispatch("ANSWER"))
+
+    def test_the_answer_to_the_last_question_is_returned_with_its_heading(self):
+        self.add_speech("the lease timeout was thirty seconds")
+        self.dispatch("EXPLAIN")
+        self.wait_for_one_answer()
+        reply = self.wait_for_the_answer_to_be_complete()
+        self.assertIn("explanation", reply)
+        self.assertIn("stub answer", reply)
+
+    def wait_for_the_answer_to_be_complete(self):
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            reply = self.dispatch("ANSWER")
+            if "complete" in reply:
+                return reply
+            time.sleep(0.02)
+        return self.dispatch("ANSWER")
+
+
+class ModelSelectionTest(AssistantCommandTestCase):
+    """Choosing between the models this endpoint is already serving. Loading a
+    different one is Phase 8 work; asking a different one is not."""
+
+    def test_the_served_models_are_listed_with_the_one_answering_named(self):
+        """Machine readable, for the same reason as STATUS_FIELDS: the menu builds
+        its model list from this."""
+        reply = self.dispatch("MODELS")
+        self.assertIn("serving=%s,%s" % (config.llm_model, config.vision_llm_model), reply)
+        self.assertIn("answering=%s" % config.llm_model, reply)
+
+    def test_a_served_model_can_be_chosen_and_is_then_reported(self):
+        self.assertTrue(self.dispatch("SET_MODEL %s" % config.vision_llm_model)
+                        .startswith("OK "))
+        self.assertIn("model=%s" % config.vision_llm_model, self.dispatch("STATUS_FIELDS"))
+
+    def test_a_model_the_endpoint_does_not_serve_is_refused(self):
+        """This endpoint answers for an identifier it does not serve with whatever is
+        loaded, so accepting one would silently point the assistant at nothing."""
+        reply = self.dispatch("SET_MODEL something-nobody-loaded")
+        self.assertTrue(reply.startswith("FAIL "), reply)
+        self.assertIn("model=%s" % config.llm_model, self.dispatch("STATUS_FIELDS"))
+
+    def test_choosing_a_model_without_naming_one_is_refused(self):
+        self.assertTrue(self.dispatch("SET_MODEL").startswith("FAIL "))
+
+
+class RecognitionLanguageTest(AssistantCommandTestCase):
+    """Which language the recogniser is told it is listening to."""
+
+    def test_the_current_language_is_part_of_the_status(self):
+        self.assertIn("language=%s" % config.whisper_language, self.dispatch("STATUS_FIELDS"))
+
+    def test_an_offered_language_is_accepted_and_reaches_the_recogniser(self):
+        self.assertTrue(self.dispatch("SET_LANGUAGE de").startswith("OK "))
+        self.assertEqual("de", self.assistant._transcriber.language)
+        self.assertIn("language=de", self.dispatch("STATUS_FIELDS"))
+
+    def test_a_language_nobody_offers_is_refused_rather_than_guessed_at(self):
+        reply = self.dispatch("SET_LANGUAGE kl")
+        self.assertTrue(reply.startswith("FAIL "), reply)
+        self.assertEqual(config.whisper_language, self.assistant._transcriber.language)
 
 
 class TranscriptRetentionTest(AssistantCommandTestCase):

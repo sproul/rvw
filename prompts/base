@@ -29,19 +29,31 @@ The system should eventually choose appropriately sized local models for each ma
 9. Every phase should end in something runnable and testable.
 10. Prefer a CLI or minimal menu-bar utility over a sophisticated GUI until the core system proves useful.
 
-# CURRENT STATE — updated 2026-08-22 after the first step of Phase 6
+# CURRENT STATE — updated 2026-08-22 after Phase 6
 
-Phases 0 to 4 are implemented, and the menu bar half of Phase 6 was built and
-verified on the M3 on 2026-08-22: a Hammerspoon menu bar item whose title is the
-recording indicator (`rvw L` listening, `R` retaining, `A` analysing, `P`
-presenting, `rvw x` no assistant), source selection, the retention and continuous
-toggles, every action, the hotkey list, and presenting mode — one switch that
-suppresses every alert, failures included, because on a shared screen the
-audience reads them first. It reads one new dispatcher command, `STATUS_FIELDS`,
-because the prose of `STATUS` is written for a person. No window is created by any
-of it, which is the answer to the phase's warning; the transcript and answer
-windows are deliberately still to come and will need `NSWindow.sharingType =
-.none`. Phase 5 is untouched, so there are no language profiles to select yet.
+Phases 0 to 4 are implemented, and Phase 6 was built and verified on the M3 on
+2026-08-22, except for the comprehension profiles it lists, which belong to the
+unbuilt Phase 5. What Phase 6 added:
+
+* a Hammerspoon menu bar item whose title is the recording indicator (`rvw L`
+  listening, `R` retaining, `A` analysing, `P` presenting, `rvw x` no assistant),
+  with source selection, the retention and continuous toggles, both windows, the
+  model and language menus, every action and the hotkey list;
+* presenting mode (alt-cmd-P) — one switch that suppresses every alert, failures
+  included, because on a shared screen the audience reads them first;
+* a rolling transcript window and an answer window, `bin/rvw_view`, which are a
+  separate Swift program because only `NSWindow.sharingType = .none` makes a
+  window invisible to ScreenCaptureKit, Zoom, Meet, Teams and this assistant's own
+  screenshot helper. Measured: on screen according to the Accessibility API and
+  absent from a full display capture taken at that moment. The viewer refuses to
+  show a window the window server will not exclude, and exits when the assistant
+  goes away, so no window outlives its session;
+* model selection between the models the endpoint already serves, and recognition
+  language selection (de, en, fr), both from the menu;
+* the machine readable `STATUS_FIELDS` and `MODELS`, because the prose of `STATUS`
+  is written for a person and a menu bar reading prose breaks when the wording
+  improves.
+
 See `doc/phase6`.
 
 Phases 0 to 4 in detail. Phase 4, searchable meeting memory, was built on
@@ -93,8 +105,11 @@ What exists in the repository:
   point required from `~/.hammerspoon/init.lua`, `rvw_menu.lua` the menu bar item,
   `rvw_config.lua` what the keys and the menu do, `rvw_state.lua` the pure title
   and alert decisions, `rvw_client.lua` the rvwctl calls, `rvw_presenting.lua`
-  whether the screen is being shared, `rvw_actions.lua` one entry run for both.
-* `test/` with 238 unittest tests, run by `util/run_tests.sh`.
+  whether the screen is being shared, `rvw_windows.lua` the two windows,
+  `rvw_actions.lua` one entry run for both.
+* `test/` with 272 unittest tests, run by `util/run_tests.sh`.
+* `helper/rvw_view.swift` → `bin/rvw_view`, the transcript and answer windows; it
+  needs no macOS permission and its windows cannot be captured by anything.
 * `util/init_local_models.sh` installs and verifies the model stack, and
   `util/init_permissions.sh` explains, probes and reports every macOS privacy
   permission (Microphone, Audio Recording, Screen Recording, Accessibility);
@@ -108,12 +123,14 @@ Commands understood today: `EXPLAIN [seconds]`, `CLARIFY [seconds]`,
 `SCREENSHOT`, `INTERPRET_SCREEN [seconds]`, `SEARCH <words>`, `RECALL <question>`,
 `REINDEX`, `START_CAPTURE [streams]`,
 `STOP_CAPTURE`, `TOGGLE_CAPTURE`, `TOGGLE_CONTINUOUS`, `START_RETAINING`,
-`STOP_RETAINING`, `TOGGLE_RETENTION`, `STATUS`, `STATUS_FIELDS`, `QUIT`.
+`STOP_RETAINING`, `TOGGLE_RETENTION`, `TRANSCRIPT [seconds]`, `ANSWER`, `MODELS`,
+`SET_MODEL <identifier>`, `SET_LANGUAGE <code>`, `STATUS`, `STATUS_FIELDS`, `QUIT`.
 Hotkeys today, all declared in one table in `hammerspoon/rvw_config.lua`:
 alt-cmd-R capture, ctrl-alt-cmd-R capture and analyse,
 alt-cmd-E explain the last 60 seconds, alt-cmd-C clarify the last 45 seconds,
 alt-cmd-S screenshot, ctrl-alt-cmd-S screenshot and interpret, alt-cmd-T keep or
-stop keeping the transcript, alt-cmd-P presenting (draw nothing on this screen).
+stop keeping the transcript, alt-cmd-P presenting (draw nothing on this screen),
+alt-cmd-W the transcript window, ctrl-alt-cmd-W the answer window.
 
 One session archives everything it keeps in
 `var/meetings/YYYY/MM/YYYY-MM-DD_HH.MM/`: `transcript.jsonl` while retention is
@@ -194,10 +211,19 @@ What was learned, and what it changes:
    itself silent. Automatic detection of a share is best effort and always will be
    — a Meet or Teams share inside a browser tab is indistinguishable from the tab
    — so detection may add certainty and must never override a manual "I am
-   presenting". The menu bar creates no window at all, which is why nothing can
-   appear in shared material; the transcript and answer windows of the rest of
-   Phase 6 will need `NSWindow.sharingType = .none` and therefore cannot be
-   Hammerspoon canvases.
+   presenting". The two windows do not depend on that detection at all, which is
+   the point: `NSWindow.sharingType = .none` has the window server exclude them
+   from every capture, verified as on screen to the Accessibility API and absent
+   from a display capture at the same moment. A window that could be captured is
+   worse than no window, so the viewer refuses to show one, and a window must not
+   outlive the session it shows, so it exits when the assistant does.
+16. Every reader added to this system found something the last one had not needed.
+   The window wanted a whole transcript, and `bin/rvwctl` had been reading one 4 kB
+   recv since Phase 1 — enough for a single line reply, and half a transcript looks
+   exactly like a transcript. The answer window wanted an answer that only existed
+   as terminal output, which is now also collected in `answer_buffer.py` and knows
+   whether it is in progress, complete or failed. Assume the next reader will find
+   one more.
 
 CLARIFY is the clearest Phase 2 win so far: asked about "The least timeout on the
 coordinator" and "exponential back off", both misrecognitions, it returned "lease
@@ -538,7 +564,7 @@ Do not implement external lookup until the local system is solid.
 
 ---
 
-# PHASE 6 — Single-Mac polished operation (menu bar DONE and VERIFIED on m3; windows, model and profile selection still open)
+# PHASE 6 — Single-Mac polished operation (DONE and VERIFIED on m3, except the comprehension profiles, which are Phase 5)
 
 Turn the prototype into a convenient Mac utility.
 

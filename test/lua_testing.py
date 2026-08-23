@@ -46,6 +46,18 @@ def load_module_expression(module_name):
     return 'dofile("%s/%s.lua")' % (hammerspoon_dir, module_name)
 
 
+# The running Hammerspoon has its own copy of every rvw module from whenever its
+# configuration was last loaded, and require() would hand a test that copy rather
+# than the file it is testing. Forgetting them all first is what makes a test
+# measure the checkout. The live menu bar keeps working: it holds references to
+# the tables it was given, not to this cache.
+forget_loaded_modules = '''
+for name in pairs(package.loaded) do
+  if name:match("^rvw_") then package.loaded[name] = nil end
+end
+'''
+
+
 class PureLuaTestCase(unittest.TestCase):
     """Base class for tests that need Hammerspoon's lua and nothing else."""
 
@@ -62,5 +74,6 @@ class PureLuaTestCase(unittest.TestCase):
 
     def evaluate_body(self, body):
         """The value returned by several lines of lua, for what an expression cannot say."""
-        return evaluate_lua("local module = %s\n%s"
-                           % (load_module_expression(self.module_name), body))
+        return evaluate_lua("%s\nlocal module = %s\n%s"
+                           % (forget_loaded_modules,
+                              load_module_expression(self.module_name), body))

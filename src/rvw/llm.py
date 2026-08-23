@@ -35,6 +35,11 @@ class LocalLlm:
         # use one would only confuse it.
         self._suppress_reasoning = suppress_reasoning
 
+    @property
+    def model(self):
+        """The identifier this client asks for, which the menu bar reports."""
+        return self._model
+
     def available_models(self):
         try:
             with urllib.request.urlopen(self._base_url + "/models", timeout=10) as response:

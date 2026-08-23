@@ -26,12 +26,12 @@ command_source_pattern = re.compile(r"(?:commands?\s*=|send(?:_all)?\()\s*(\{[^}
 quoted_string_pattern = re.compile(r"\"([^\"]*)\"")
 hotkey_table_pattern = re.compile(r"config\.hotkeys\s*=\s*\{(.*?)\n\}", re.DOTALL)
 
-idle_status = "OK capture=none continuous=off meeting=2026-08-22_21.30 " \
-              "model=meeting-assistant retention=ephemeral segments=0 streams=mic,system " \
-              "vision_model=meeting-vision"
-busy_status = "OK capture=mic,system continuous=on meeting=2026-08-22_21.30 " \
-              "model=meeting-assistant retention=retained segments=12 streams=mic,system " \
-              "vision_model=meeting-vision"
+idle_status = "OK capture=none continuous=off language=en languages=de,en,fr " \
+              "meeting=2026-08-22_21.30 model=meeting-assistant retention=ephemeral " \
+              "segments=0 streams=mic,system vision_model=meeting-vision"
+busy_status = "OK capture=mic,system continuous=on language=de languages=de,en,fr " \
+              "meeting=2026-08-22_21.30 model=meeting-assistant retention=retained " \
+              "segments=12 streams=mic,system vision_model=meeting-vision"
 
 
 def lua_files():
@@ -183,6 +183,33 @@ class MenuContentsTest(lua_testing.PureLuaTestCase):
         self.assertIn("Screenshot and interpret", titles)
         self.assertIn("Model: meeting-assistant", titles)
         self.assertIn("Quit the assistant", titles)
+
+    def test_both_windows_can_be_shown_from_the_menu(self):
+        titles = self.titles(idle_status)
+        self.assertIn("Transcript window", titles)
+        self.assertIn("Answer window", titles)
+
+    def test_the_recognition_language_is_shown_and_offered(self):
+        titles = self.titles(busy_status)
+        self.assertIn("Recognising: de", titles)
+        languages = self.submenu_titles(busy_status, "Recognising: de")
+        self.assertEqual(["de [checked]", "en", "fr"], languages)
+
+    def submenu_titles(self, status_reply, item_title):
+        """The titles inside one submenu, checked ones marked."""
+        listed = self.evaluate_body("""
+            local state = require("rvw_state")
+            local titles = {}
+            for _, item in ipairs(module.items(state.parse_status_fields("%s"))) do
+              if item.title == "%s" then
+                for _, entry in ipairs(item.menu or {}) do
+                  table.insert(titles, entry.title .. (entry.checked and " [checked]" or ""))
+                end
+              end
+            end
+            return table.concat(titles, "\\n")
+            """ % (status_reply, item_title))
+        return listed.splitlines()
 
 
 class AlertPolicyTest(lua_testing.PureLuaTestCase):

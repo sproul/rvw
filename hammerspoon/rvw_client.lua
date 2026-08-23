@@ -9,7 +9,8 @@ local state = require("rvw_state")
 local client = {}
 
 local module_dir = debug.getinfo(1, "S").source:sub(2):match("(.*)/")
-client.rvwctl = module_dir:gsub("/hammerspoon$", "") .. "/bin/rvwctl"
+client.repo_dir = module_dir:gsub("/hammerspoon$", "")
+client.rvwctl = client.repo_dir .. "/bin/rvwctl"
 
 --- Send one command and return its single line reply.
 function client.send(command)
@@ -38,6 +39,12 @@ end
 --- The session state, or state.unreachable if no assistant is listening.
 function client.status()
   return state.parse_status_fields(client.send("STATUS_FIELDS"))
+end
+
+--- Which models the endpoint serves and which one answers; asked only when the
+-- menu is opened, because it costs a request to the LLM endpoint.
+function client.models()
+  return state.parse_status_fields(client.send("MODELS"))
 end
 
 return client

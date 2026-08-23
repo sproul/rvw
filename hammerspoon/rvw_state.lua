@@ -39,13 +39,27 @@ function state.parse_status_fields(reply)
   return fields
 end
 
+--- One comma separated field as a list, in the order the assistant gave it.
+function state.comma_separated(value)
+  local items = {}
+  for item in (value or ""):gmatch("[^,]+") do
+    table.insert(items, item)
+  end
+  return items
+end
+
+function state.includes(value, wanted)
+  for _, item in ipairs(state.comma_separated(value)) do
+    if item == wanted then
+      return true
+    end
+  end
+  return false
+end
+
 --- The capture streams this run of the assistant offers, in the order given.
 function state.stream_names(status)
-  local names = {}
-  for name in (status.streams or ""):gmatch("[^,]+") do
-    table.insert(names, name)
-  end
-  return names
+  return state.comma_separated(status.streams)
 end
 
 function state.is_listening(status)

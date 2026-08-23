@@ -12,6 +12,7 @@ import threading
 import time
 
 from . import config, meeting_index, prompts, recall, screenshot, session_log
+from .answer_buffer import AnswerBuffer
 from .asr import WhisperTranscriber
 from .audio_source import CaptureStream
 from .commands import CommandDispatcher
@@ -42,6 +43,7 @@ class Assistant:
                                     suppress_reasoning=False)
         self._meeting_index = meeting_index.MeetingIndex()
         self._index_built = False
+        self._answer_buffer = AnswerBuffer()
         self._dispatcher = self._build_dispatcher()
         self._control = ControlSocketServer(self._dispatcher)
         self._answering = threading.Lock()
@@ -128,10 +130,11 @@ class Assistant:
                  config.vision_llm_model)
 
     def _print_ready_banner(self):
-        log.info("OK  ready. Hotkeys: alt-cmd-R capture, ctrl-alt-cmd-R capture and analyse, "
-                 "alt-cmd-E explain the last %ds, alt-cmd-C clarify the last %ds, "
-                 "alt-cmd-S screenshot, ctrl-alt-cmd-S screenshot and interpret, "
-                 "alt-cmd-T keep or stop keeping the transcript",
+        """What this run will do, not what the keys are: the keys and the menu are
+        declared in hammerspoon/rvw_config.lua and the menu bar lists them, so
+        repeating them here only creates a second version to keep right."""
+        log.info("OK  ready. EXPLAIN covers the last %ds, CLARIFY the last %ds; the menu bar "
+                 "lists every hotkey and both windows",
                  int(config.explain_window_seconds), int(config.clarify_window_seconds))
         log.info("OK  screenshots are archived under %s", self._archive.directory)
         log.info("OK  transcript retention: %s", self._archive.describe_state())
@@ -140,13 +143,17 @@ class Assistant:
 
     def _build_dispatcher(self):
         dispatcher = CommandDispatcher()
-        for name, handler in [("CLARIFY", self._command_clarify),
+        for name, handler in [("ANSWER", self._command_answer),
+                              ("CLARIFY", self._command_clarify),
                               ("EXPLAIN", self._command_explain),
                               ("INTERPRET_SCREEN", self._command_interpret_screen),
+                              ("MODELS", self._command_models),
                               ("RECALL", self._command_recall),
                               ("REINDEX", self._command_reindex),
                               ("SCREENSHOT", self._command_screenshot),
                               ("SEARCH", self._command_search),
+                              ("SET_LANGUAGE", self._command_set_language),
+                              ("SET_MODEL", self._command_set_model),
                               ("START_CAPTURE", self._command_start_capture),
                               ("START_RETAINING", self._command_start_retaining),
                               ("STATUS", self._command_status),
@@ -156,6 +163,7 @@ class Assistant:
                               ("TOGGLE_CAPTURE", self._command_toggle_capture),
                               ("TOGGLE_CONTINUOUS", self._command_toggle_continuous),
                               ("TOGGLE_RETENTION", self._command_toggle_retention),
+                              ("TRANSCRIPT", self._command_transcript),
                               ("QUIT", self._command_quit)]:
             dispatcher.register(name, handler)
         return dispatcher
@@ -287,6 +295,58 @@ class Assistant:
             raise ValueError("%s needs something to look for" % command_name)
         return query
 
+    # -- what a window shows (Phase 6) -------------------------------------
+
+    def _command_transcript(self, arguments):
+        """The rolling transcript, for the window that shows it during a meeting."""
+        window_seconds = self._requested_window_seconds(arguments,
+                                                        config.transcript_display_seconds)
+        text = self._transcript.render_window(window_seconds, now=time.time())
+        if not text:
+            return "nothing has been transcribed in the last %ds" % window_seconds
+        return "transcript of the last %ds:\n%s" % (window_seconds, text)
+
+    def _command_answer(self, arguments):
+        """The answer being written, or the last one; the answer window polls this."""
+        return self._answer_buffer.render()
+
+    # -- choosing the model and the language (Phase 6) ---------------------
+
+    def _command_models(self, arguments):
+        """What this endpoint serves and which of them answers, as key=value pairs.
+
+        The menu builds its model list from this, so it is machine readable for the
+        same reason STATUS_FIELDS is. It is asked only when the menu is opened,
+        because unlike the rest of the status it costs a request to the endpoint.
+        """
+        served = self._llm.available_models()
+        fields = {"answering": self._llm.model, "serving": ",".join(served) or "nothing"}
+        require_space_free_field_values(fields)
+        return " ".join("%s=%s" % pair for pair in sorted(fields.items()))
+
+    def _command_set_model(self, arguments):
+        """Ask a different one of the models this endpoint already serves.
+
+        Loading a different model is Phase 8 work and is not this. The identifier
+        has to be served now, because this endpoint answers for an identifier it
+        does not serve with whatever is loaded: accepting an unserved one here
+        would point the assistant at a model that never answers as itself.
+        """
+        identifier = self._required_query(arguments, "SET_MODEL")
+        served = self._llm.available_models()
+        if identifier not in served:
+            raise ValueError("this endpoint does not serve %r; it serves %s"
+                             % (identifier, ", ".join(served) or "nothing"))
+        self._llm = LocalLlm(model=identifier,
+                             loads_on_demand=identifier == config.llm_model)
+        return "questions now go to %s" % identifier
+
+    def _command_set_language(self, arguments):
+        """Tell the recogniser which language it is listening to from now on."""
+        language = self._required_query(arguments, "SET_LANGUAGE")
+        self._transcriber.set_language(language)
+        return "recognising %s from the next utterance onwards" % language
+
     # -- status and shutdown -----------------------------------------------
 
     def _command_status(self, arguments):
@@ -311,8 +371,10 @@ class Assistant:
         """One description of the session, rendered by both STATUS commands."""
         return {"capture": ",".join(self._running_stream_names()) or "none",
                 "continuous": "on" if self._continuous_analysis.is_set() else "off",
+                "language": self._transcriber.language,
+                "languages": ",".join(config.recognition_languages),
                 "meeting": self._archive.directory.name,
-                "model": config.llm_model,
+                "model": self._llm.model,
                 "retention": "retained" if self._archive.is_retaining else "ephemeral",
                 "segments": str(self._transcript.segment_count),
                 "streams": ",".join(self._streams),
@@ -376,11 +438,14 @@ class Assistant:
                                                  % config.continuous_analysis_period_seconds))
 
     def _answer(self, llm, messages, context_text, heading):
-        """Stream one answer to the terminal and record it in the session log."""
+        """Stream one answer to the terminal, the buffer and the session log."""
+        self._answer_buffer.begin(heading)
         try:
             self._stream_answer_to_terminal(llm, messages, context_text, heading)
+            self._answer_buffer.finish()
         except Exception as error:
             log.error("FAIL %s: %s", heading, error)
+            self._answer_buffer.fail(str(error))
         finally:
             self._answering.release()
 
@@ -394,8 +459,9 @@ class Assistant:
         session_log.write_answer_record(self._log_path, "transcript window", context_text)
         session_log.write_answer_record(self._log_path, heading, answer)
 
-    @staticmethod
-    def _write_token(token):
+    def _write_token(self, token):
+        """Every token goes to the terminal and to whatever window is watching."""
+        self._answer_buffer.append(token)
         sys.stdout.write(token)
         sys.stdout.flush()
 

@@ -23,6 +23,21 @@ class WhisperTranscriber:
         self._language = language
         self._lock = threading.Lock()
 
+    @property
+    def language(self):
+        return self._language
+
+    def set_language(self, language):
+        """Change the language of the utterances recognised from now on.
+
+        Not of the ones already queued: they were spoken in whatever language was
+        set when they were captured, and re-recognising them would cost more than
+        the mistake is worth.
+        """
+        config.require_known_recognition_language(language)
+        with self._lock:
+            self._language = language
+
     def warm_up(self):
         """Pay the model load cost before the first real utterance arrives."""
         started = time.monotonic()

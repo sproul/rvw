@@ -7,11 +7,14 @@
 local client = require("rvw_client")
 local presenting = require("rvw_presenting")
 local state = require("rvw_state")
+local windows = require("rvw_windows")
 
 local actions = {}
 
 local local_actions = {
+  toggle_answer_window = function() return windows.toggle("answer") end,
   toggle_presenting = presenting.toggle,
+  toggle_transcript_window = function() return windows.toggle("transcript") end,
 }
 
 local function commands_of(entry)

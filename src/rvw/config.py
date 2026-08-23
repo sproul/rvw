@@ -16,7 +16,8 @@ run_dir = var_dir / "run"
 
 capture_helper_path = bin_dir / "audio_capture"
 screen_capture_helper_path = bin_dir / "screen_capture"
-control_socket_path = run_dir / "rvw.sock"
+# RVW_CONTROL_SOCKET moves the socket for both ends; bin/rvwctl reads the same one.
+control_socket_path = Path(os.environ.get("RVW_CONTROL_SOCKET", run_dir / "rvw.sock"))
 
 # Canonical archive of saved screenshots, and in Phase 3 of saved transcripts.
 archive_dir = Path(os.environ.get("RVW_ARCHIVE_DIR", var_dir / "meetings"))
@@ -37,6 +38,7 @@ max_segment_seconds = 20.0
 
 # Transcript.
 transcript_retention_seconds = 1800.0
+transcript_display_seconds = 300.0       # what the transcript window shows by default
 explain_window_seconds = 60.0
 clarify_window_seconds = 45.0            # short: clarify is about the words just spoken
 interpret_window_seconds = 120.0         # context sent with a screenshot
@@ -64,9 +66,14 @@ search_result_limit = 8                 # hits SEARCH shows for one query
 recall_passage_count = 6                # passages retrieved to ground one RECALL answer
 screenshot_association_seconds = 120.0  # a screenshot captured this near a passage is "associated"
 
-# Speech recognition.
+# Speech recognition. The language is what the recogniser is told to expect, and
+# it can be changed while the assistant runs (SET_LANGUAGE); it takes effect on
+# the next utterance recognised, not on the ones already queued. The offered set
+# is deliberately short: these are the languages of Phase 0 and Phase 5, and a
+# code nobody offers is far more likely to be a typo than a wish.
 whisper_model = os.environ.get("RVW_WHISPER_MODEL", "mlx-community/whisper-large-v3-turbo")
 whisper_language = os.environ.get("RVW_WHISPER_LANGUAGE", "en")
+recognition_languages = ("de", "en", "fr")
 
 # Local LLM, served by the llmster/LM Studio OpenAI compatible endpoint.
 llm_base_url = os.environ.get("RVW_LLM_URL", "http://127.0.0.1:1234/v1")
@@ -126,6 +133,17 @@ def require_known_stream(stream_name):
     """Reject a capture stream name that the rest of the system cannot label."""
     if stream_name not in stream_labels:
         raise ValueError("unknown capture stream %r" % (stream_name,))
+
+
+def require_known_recognition_language(language):
+    """Reject a language the recogniser was not offered, rather than listening in it.
+
+    Whisper would accept almost any code and quietly recognise badly, which reads
+    as a broken microphone rather than as a wrong setting.
+    """
+    if language not in recognition_languages:
+        raise ValueError("unknown recognition language %r; offered: %s"
+                         % (language, ", ".join(recognition_languages)))
 
 
 def require_known_retention_mode(mode):

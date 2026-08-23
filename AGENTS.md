@@ -5,6 +5,8 @@
   screenshot archiving, optional transcript retention)
 - `helper/audio_capture.swift` Core Audio capture helper, built into `bin/audio_capture`
 - `helper/screen_capture.swift` ScreenCaptureKit helper, built into `bin/screen_capture`
+- `helper/rvw_view.swift` the transcript and answer windows, built into `bin/rvw_view`;
+  needs no permission, and its windows are excluded from screen capture
 - `bin/rvw` daemon launcher, `bin/rvwctl` hotkey client (system python, stdlib only)
 - `helper/rvw_launcher.swift` + `helper/rvw_app.plist` built by `helper/build_app.sh` into
   `bin/rvw.app`, the bundle that owns the macOS permissions
@@ -13,7 +15,8 @@
   `rvw_config.lua` is what the keys and the menu do and the only file to edit;
   `rvw_state.lua` is pure (no hs API) and holds the title and alert decisions;
   `rvw_client.lua` talks to the daemon through `bin/rvwctl`; `rvw_presenting.lua` knows
-  whether this screen is being shared; `rvw_actions.lua` runs one entry for both
+  whether this screen is being shared; `rvw_windows.lua` starts and stops `bin/rvw_view`;
+  `rvw_actions.lua` runs one entry for both
 - `doc/` phase reports and model reasoning, `prompts/` the specification
 - `var/meetings/YYYY/MM/YYYY-MM-DD_HH.MM/` everything one session keeps:
   `transcript.jsonl` and `metadata.json`, `transcript.md` rendered from the JSONL, and
@@ -37,8 +40,10 @@
 - Run the tests: `util/run_tests.sh` (unittest, no pytest in the venv)
 - Run the assistant: `bin/rvw [--source mic|system|both] [--listen] [--debug]`, which starts it
   inside `bin/rvw.app`; `bin/rvw -here ...` runs it in this terminal instead
-- Send a command: `bin/rvwctl EXPLAIN|CLARIFY|SCREENSHOT|INTERPRET_SCREEN|SEARCH|RECALL|REINDEX|TOGGLE_CAPTURE|TOGGLE_CONTINUOUS|START_RETAINING|STOP_RETAINING|TOGGLE_RETENTION|STATUS|STATUS_FIELDS|QUIT`
+- Send a command: `bin/rvwctl EXPLAIN|CLARIFY|SCREENSHOT|INTERPRET_SCREEN|SEARCH|RECALL|REINDEX|TOGGLE_CAPTURE|TOGGLE_CONTINUOUS|START_RETAINING|STOP_RETAINING|TOGGLE_RETENTION|TRANSCRIPT|ANSWER|MODELS|SET_MODEL|SET_LANGUAGE|STATUS|STATUS_FIELDS|QUIT`
   (`SEARCH <words>` and `RECALL <question>` take free text, e.g. `bin/rvwctl RECALL what did they say about reconnect behavior`)
+- Show one window by hand: `bin/rvw_view --window transcript|answer [--seconds 300]`; the
+  menu bar and alt-cmd-W / ctrl-alt-cmd-W do the same thing
 - Take one screenshot by hand: `bin/screen_capture --output /tmp/shot.png --target frontmost`
 
 ## Notes
@@ -120,11 +125,34 @@
   while the screen is shared the audience reads them before I do. Turning it on is
   therefore silent; turning it off is not. Automatic share detection is best effort and
   only recognises Zoom's own share window (`config.sharing_windows`); it can add certainty
-  but never remove a manual "I am presenting". Phase 6 deliberately creates no window at
-  all, which is why nothing can appear in shared material; a later transcript or answer
-  window will need `NSWindow.sharingType = .none` and cannot be a Hammerspoon canvas.
+  but never remove a manual "I am presenting". Nothing else the assistant draws depends on
+  that detection: the two windows are excluded from capture by the window server itself, as
+  the next note but two explains, so they are safe whether a share was noticed or not.
 - The lua is tested two ways (`test/test_menu_bar.py`): statically, that every command it
   names is one the dispatcher registers, and behaviourally, by evaluating the pure modules
   in the running Hammerspoon with `hs -c` (`test/lua_testing.py`, skipped if it is not
-  running). There is no standalone lua on these machines.
+  running). There is no standalone lua on these machines. `lua_testing` forgets every
+  loaded `rvw_*` module first: Hammerspoon holds its own copy from whenever its
+  configuration was loaded, and a test measuring that copy would pass on a broken checkout.
+- The transcript and answer windows are `bin/rvw_view`, one process per window, polling
+  `TRANSCRIPT` and `ANSWER`. They exist as a separate Swift program because only
+  `NSWindow.sharingType = .none` makes a window invisible to ScreenCaptureKit, Zoom, Meet,
+  Teams and this assistant's own screenshot helper; Hammerspoon cannot set it, and it could
+  not go into `bin/rvw.app` without voiding that bundle's permissions. If the window server
+  refuses the setting the viewer dies rather than showing a capturable window, and after
+  eight unanswered polls it exits, so no window outlives its session. Verified on the M3 on
+  2026-08-22: on screen according to the Accessibility API, absent from a full display
+  capture taken at the same moment.
+- `ANSWER` reports the answer being written or the last one, from `src/rvw/answer_buffer.py`,
+  which the same `_write_token` fills as the terminal output. A failed answer says FAIL
+  there, so a window never implies that more is coming.
+- `bin/rvwctl` reads until the assistant closes the connection, because a transcript reply
+  is far larger than one read and half a transcript looks like a transcript.
+  `RVW_CONTROL_SOCKET` moves the socket for the daemon and the client together.
+- `MODELS` and `SET_MODEL` choose between the models the endpoint already serves; loading a
+  different one is Phase 8. An identifier the endpoint does not serve is refused, because
+  this build would answer for it with whatever is loaded. `SET_LANGUAGE` changes what the
+  recogniser expects from the next utterance onwards, restricted to
+  `config.recognition_languages`; `STATUS_FIELDS` reports `language` and `languages`, so the
+  menu keeps no list of its own.
 - Tuning knobs (silence threshold, window lengths, models) are all in `src/rvw/config.py`.

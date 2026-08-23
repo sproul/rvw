@@ -39,10 +39,25 @@ build_helper() {
     log_ok "signed $output_binary"
 }
 
+# The viewer draws windows and reads the assistant's own socket, so it asks macOS
+# for nothing and needs no usage description embedded in it.
+build_viewer() {
+    local output_binary=$repo_dir/bin/rvw_view
+
+    swiftc -O -parse-as-library -o "$output_binary" "$script_dir/rvw_view.swift" \
+        -framework AppKit || die "compiling rvw_view failed"
+    log_ok "compiled $output_binary"
+
+    codesign --force --sign - --identifier "ai.rvw.rvw_view" "$output_binary" ||
+        die "ad hoc code signing of rvw_view failed"
+    log_ok "signed $output_binary"
+}
+
 mkdir -p "$repo_dir/bin" || die "cannot create $repo_dir/bin"
 
 build_helper audio_capture AVFoundation CoreAudio
 build_helper screen_capture AppKit ScreenCaptureKit ImageIO
+build_viewer
 
 "$script_dir/build_app.sh" || die "building bin/rvw.app failed"
 

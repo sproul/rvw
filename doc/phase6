@@ -1,7 +1,9 @@
-# Phase 6 - single Mac polished operation, first step: the menu bar
+# Phase 6 - single Mac polished operation
 
-Built 2026-08-22 on the M3. Verified against the running daemon and the running
-Hammerspoon the same evening.
+Built 2026-08-22 on the M3 in two steps, both verified against the running daemon
+and the running Hammerspoon the same evening: the menu bar first, then the
+windows, model selection and language selection. The first half of this report is
+the menu bar; "Second step" below is the rest.
 
 ## The smallest goal
 
@@ -17,11 +19,9 @@ genuinely invisible to ScreenCaptureKit. That is the right answer for the
 transcript and answer windows and is deliberately left for later: this step adds
 no window at all, so it does not need it.
 
-Not built, and still open from the phase list: the rolling transcript window, the
-answer window (answers still stream into the assistant's own terminal), model
-selection (the identifier is fixed and switching the model behind it is Phase 8
-work) and language/profile selection (Phase 5 does not exist yet, so there is
-nothing to select).
+Not built in the first step, and all built in the second: the transcript window,
+the answer window, model selection and recognition language selection. Still not
+built at all: comprehension profiles, because Phase 5 does not exist yet.
 
 ## What was added
 
@@ -106,11 +106,112 @@ is left to manual verification.
   line showed the live session and its meeting directory, `TOGGLE_RETENTION`
   moved the title to `rvw R`, and the presenting toggle moved it to `rvw RP`.
 
+# Second step: the windows, the model and the language
+
+## The windows, and why they are a separate program
+
+`bin/rvw_view` (`helper/rvw_view.swift`), one process per window, started and
+stopped by the menu bar or by alt-cmd-W and ctrl-alt-cmd-W. It shows either the
+rolling transcript or the current answer, polled from the daemon (`TRANSCRIPT`,
+`ANSWER`) every 2.0s and 0.8s.
+
+It is Swift, and a separate program, for exactly one reason: a window that must
+never appear in shared material has to be excluded by the window server itself,
+and the only thing that does that is `NSWindow.sharingType = .none`. A window set
+that way is invisible to ScreenCaptureKit, to `CGWindowListCreateImage`, to Zoom,
+Meet and Teams, and to this assistant's own screenshot helper. Hammerspoon cannot
+set it on a canvas, and it could not be added to `bin/rvw.app` either, because
+re-signing that bundle voids every permission granted to it. So it is its own
+binary, and it asks macOS for nothing at all: it draws text and reads a socket.
+
+Two further rules follow from the same worry:
+
+* If the window server does not accept the setting, the viewer dies instead of
+  showing the window. A window that could be captured is worse than no window.
+* A window does not outlive the session it is showing. The viewer exits after
+  eight polls with no assistant answering (measured: 6.4s for the answer window),
+  so a finished conversation cannot sit on the screen looking live, and reloading
+  Hammerspoon closes both windows because they are its child tasks.
+
+Measured on the M3 on 2026-08-22, which is the verification that matters here:
+with the transcript window open, Hammerspoon's Accessibility view of it said
+`rvw transcript true` -- the window was on screen -- while `bin/screen_capture
+--target display` produced a full 3440x1440 capture of that same screen with no
+trace of the window in it. The viewer had logged `OK rvw transcript is excluded
+from screen capture (sharingType none)`.
+
+## Model selection
+
+`MODELS` reports what the endpoint serves and which of them answers, as key=value
+pairs (the menu parses it with the same parser as `STATUS_FIELDS`); `SET_MODEL
+<identifier>` switches. It refuses an identifier the endpoint is not serving,
+because this LM Studio build answers for an unknown identifier with whatever is
+loaded: accepting one would point the assistant at a model that never answers as
+itself. Loading a different model is still Phase 8 work; choosing between the
+loaded ones is not.
+
+This was worth having immediately. On the M3 the endpoint turned out to be serving
+`qwen3.6-35b-a3b` and an embedding model, and nothing under the `meeting-assistant`
+identifier the assistant asks for, which the menu now shows at a glance.
+
+## Language selection
+
+`SET_LANGUAGE <code>` changes what the recogniser is told to expect, from the next
+utterance onwards; already queued audio was spoken in the old language and
+re-recognising it would cost more than the mistake is worth. The offered set is
+`config.recognition_languages` (de, en, fr), reported in the status as `languages`
+so the menu builds its list from the daemon rather than keeping its own copy, and
+a code nobody offers is refused: Whisper would accept almost anything and
+recognise badly, which reads as a broken microphone rather than a wrong setting.
+
+This is language selection, not Phase 5. There are no comprehension profiles yet.
+
+## Two things the windows forced
+
+* `bin/rvwctl` read one 4 kB `recv`, which was enough while every reply was a
+  single line. A transcript is tens of kilobytes and half a transcript in a window
+  looks exactly like a transcript, so it now reads until the assistant closes the
+  connection. `RVW_CONTROL_SOCKET` moves the socket for both ends, which is what
+  lets a test drive the real client.
+* Answers only ever existed as terminal output. `src/rvw/answer_buffer.py` keeps
+  the current one -- heading, text and whether it is in progress, complete or
+  failed -- fed by the same `_write_token` that writes to the terminal. A failed
+  answer says so, because an answer that stopped must not sit in a window looking
+  as though more were coming.
+
+## Tests after the second step
+
+272 in total, all passing. New: `test_answer_buffer.py` (6),
+`test_control_client.py` (5, driving the real `bin/rvwctl` against a stand in
+assistant), `test_view_window.py` (9: the capture exclusion and its refusal
+asserted in the source, the viewer's imports, and the real binary polling a stand
+in assistant and exiting when it goes away), plus the transcript, answer, model
+and language commands in `test_assistant.py` and the new menus in
+`test_menu_bar.py`.
+
+`test/lua_testing.py` now forgets every loaded `rvw_*` module before loading the
+one under test: the running Hammerspoon holds its own copy from whenever its
+configuration was loaded, and a test that measured that copy would pass while the
+checkout was broken.
+
+## Verified on the M3, 2026-08-22 (second step)
+
+* `util/run_tests.sh`: 272 tests, all pass.
+* The transcript window opened from Hammerspoon was invisible in a full display
+  capture while the Accessibility API confirmed it was on screen.
+* `SET_MODEL qwen3.6-35b-a3b`, `SET_LANGUAGE de` and a refused `SET_LANGUAGE kl`
+  all behaved, and `STATUS_FIELDS` reported both changes.
+* The answer window exited by itself 8 polls after `QUIT`, leaving no process.
+
 ## Still rough
 
-* The menu polls with one `rvwctl` run every five seconds, which is a system
-  python start each time. Cheap, but it is polling.
-* Model and language selection are absent, for the reasons above.
-* Answers still appear only in the assistant's terminal, so the terminal is still
-  the thing that must be kept off a shared screen.
-* Automatic share detection covers Zoom's own share window and nothing else.
+* Everything polls: the menu bar every five seconds, the windows every one or two.
+  Cheap, but it is polling, and each poll is a system python start.
+* The windows show text only, and the answer window shows the current answer, not
+  a history: the session log is the history.
+* Comprehension profiles are absent because Phase 5 has not been built.
+* Automatic share detection covers Zoom's own share window and nothing else; the
+  windows do not depend on it, but the alerts do.
+* Nothing yet reports in the window when the transcript is not being retained, so
+  a transcript window can show speech that is not being kept. That is the intended
+  behaviour but it is not visible in the window itself.

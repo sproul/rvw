@@ -30,6 +30,12 @@ config.hotkeys = {
    description = "keep or stop keeping the transcript"},
   {mods = {"alt", "cmd"}, key = "p", local_action = "toggle_presenting",
    description = "presenting: draw nothing on this screen"},
+  -- Both windows are invisible to screen capture (see rvw_windows.lua), so these
+  -- two are safe to press mid-meeting; nothing else here draws anything at all.
+  {mods = {"alt", "cmd"}, key = "w", local_action = "toggle_transcript_window",
+   description = "show or hide the rolling transcript window"},
+  {mods = {"ctrl", "alt", "cmd"}, key = "w", local_action = "toggle_answer_window",
+   description = "show or hide the answer window"},
 }
 
 -- The menu items below the capture and retention state. Anything reached by a

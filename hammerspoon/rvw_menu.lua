@@ -10,6 +10,7 @@ local client = require("rvw_client")
 local config = require("rvw_config")
 local presenting = require("rvw_presenting")
 local state = require("rvw_state")
+local windows = require("rvw_windows")
 
 local menu = {}
 
@@ -32,12 +33,7 @@ function menu.refresh()
 end
 
 local function capture_includes(status, stream_name)
-  for name in (status.capture or ""):gmatch("[^,]+") do
-    if name == stream_name then
-      return true
-    end
-  end
-  return false
+  return state.includes(status.capture, stream_name)
 end
 
 local function single_source_item(status, stream_name)
@@ -85,6 +81,41 @@ local function toggle_items(status)
   }
 end
 
+--- The two windows. They are invisible to screen capture, which is the whole
+-- reason they are a separate program; see rvw_windows.lua.
+local function window_items()
+  local items = {}
+  for _, kind in ipairs({"transcript", "answer"}) do
+    table.insert(items, {title = kind:gsub("^%l", string.upper) .. " window",
+                         checked = windows.is_showing(kind),
+                         fn = run_and_refresh({local_action = "toggle_" .. kind .. "_window"})})
+  end
+  return items
+end
+
+local function language_items(status)
+  local items = {}
+  for _, language in ipairs(state.comma_separated(status.languages)) do
+    table.insert(items, {title = language, checked = language == status.language,
+                         fn = run_and_refresh({command = "SET_LANGUAGE " .. language})})
+  end
+  return items
+end
+
+--- The models this endpoint is serving, asked for only now that the menu is open.
+local function model_items()
+  local models = client.models()
+  if not models.reachable then
+    return {{title = "no local LLM is answering", disabled = true}}
+  end
+  local items = {}
+  for _, name in ipairs(state.comma_separated(models.serving)) do
+    table.insert(items, {title = name, checked = name == models.answering,
+                         fn = run_and_refresh({command = "SET_MODEL " .. name})})
+  end
+  return items
+end
+
 local function action_items()
   local items = {}
   for _, entry in ipairs(config.menu_actions) do
@@ -105,10 +136,12 @@ local function hotkey_items()
   return items
 end
 
---- What cannot be changed from here but is worth knowing: the models and the keys.
+--- What can be chosen from here, and what can only be read.
 local function information_items(status)
   return {
-    {title = "Model: " .. (status.model or "unknown"), disabled = true},
+    {title = "Model: " .. (status.model or "unknown"), menu = model_items()},
+    {title = "Recognising: " .. (status.language or "unknown"),
+     menu = language_items(status)},
     {title = "Vision model: " .. (status.vision_model or "unknown"), disabled = true},
     {title = "Hotkeys", menu = hotkey_items()},
   }
@@ -131,6 +164,8 @@ function menu.items(status)
   append_all(items, source_items(status))
   table.insert(items, separator)
   append_all(items, toggle_items(status))
+  table.insert(items, separator)
+  append_all(items, window_items())
   table.insert(items, separator)
   append_all(items, action_items())
   table.insert(items, separator)
