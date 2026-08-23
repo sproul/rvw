@@ -5,12 +5,15 @@ them. The LLM lives in LM Studio; Whisper and the diarization model live in the
 Hugging Face cache, where lms will never see them. A listing that showed only one
 store would be worse than none, because it would look complete.
 
-The part that earns the script its place, though, is the identifier check. The
-endpoint answers a request for an identifier it does not serve with whatever
-model happens to be loaded, so 'meeting-vision' missing is not an error anybody
-sees at the time: it is a screenshot silently described by the text model. This
-listing is where that has to be visible, so an absent identifier is reported as
-FAIL and says what will happen because of it.
+The part that earns the script its place, though, is the identifier check: what
+the endpoint serves is what a hotkey will actually reach.
+
+An absent identifier is news rather than a failure, and this listing has to say
+the same as the running assistant does. LM Studio unloads the LLM after an idle
+hour by design and model_loader loads it again on the first question, and a
+vision model is optional; assistant.py logs INFO for both. Reporting either as
+FAIL would spend the word on something working exactly as designed. The genuine
+failure is an endpoint serving nothing at all, which is not a model question.
 """
 
 import tempfile
@@ -24,6 +27,7 @@ sourceable_script = None
 model_listing_with = """{"data": [{"id": "meeting-assistant"}, {"id": "qwen3.6-35b-a3b"}]}"""
 model_listing_with_vision = (
     """{"data": [{"id": "meeting-assistant"}, {"id": "meeting-vision"}]}""")
+model_listing_with_neither = """{"data": [{"id": "some-other-model"}]}"""
 
 
 def setUpModule():
@@ -82,7 +86,7 @@ class ServedIdentifiersTest(ListModelsTestCase):
 
 
 class IdentifierReportTest(ListModelsTestCase):
-    """An identifier that is not served is the failure nobody sees at the time."""
+    """An identifier that is not served is news, and says what follows from it."""
 
     def report(self):
         completed = self.run_fragment("report_the_identifiers_the_assistant_asks_for")
@@ -92,12 +96,32 @@ class IdentifierReportTest(ListModelsTestCase):
         reported = self.report()
         self.assertRegex(reported, r"OK.*meeting-assistant")
 
-    def test_a_missing_vision_identifier_is_reported_as_a_failure(self):
+    def test_a_missing_vision_identifier_is_news_rather_than_a_failure(self):
+        """Interpretation is optional and the assistant declines cleanly without
+        it, which is the designed behaviour and not a fault to be flagged."""
         reported = self.report()
-        self.assertRegex(reported, r"FAIL.*meeting-vision")
+        self.assertRegex(reported, r"INFO.*meeting-vision")
+        self.assertNotIn("FAIL", reported)
+
+    def test_an_unloaded_assistant_model_is_news_because_it_loads_on_demand(self):
+        """The LLM is unloaded after an idle hour by design; the next question
+        loads it again. Reporting the ordinary state as FAIL would be crying wolf."""
+        self.serve(model_listing_with_neither)
+        reported = self.report()
+        self.assertRegex(reported, r"INFO.*meeting-assistant")
+        self.assertNotIn("FAIL", reported)
 
     def test_the_missing_identifier_says_what_will_happen_because_of_it(self):
-        self.assertIn("answered by whatever model is loaded", self.report())
+        self.serve(model_listing_with_neither)
+        reported = self.report()
+        self.assertIn("loaded when it is first needed", reported)
+        self.assertIn("archives screenshots", reported)
+
+    def test_it_never_claims_the_wrong_model_will_answer_instead(self):
+        """llm.py refuses an identifier it cannot see before asking, so the
+        substitution this listing used to warn about cannot reach a user."""
+        self.serve(model_listing_with_neither)
+        self.assertNotIn("answered by whatever model is loaded", self.report())
 
     def test_nothing_fails_when_both_identifiers_are_served(self):
         self.serve(model_listing_with_vision)

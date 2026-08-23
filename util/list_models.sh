@@ -10,11 +10,16 @@
 #                      never show these, and a listing that omitted them would
 #                      look complete without being complete.
 #
-# The last section is the one worth reading. The endpoint answers a request for
-# an identifier it does not serve with whatever model happens to be loaded,
-# rather than refusing, so an identifier that is missing is not an error anyone
-# sees at the time: it is a screenshot quietly described by the text model. This
-# is where that has to be visible.
+# The last section is the one worth reading: what the endpoint serves is what a
+# hotkey will actually reach, and the two lists above can both look healthy
+# while it is empty.
+#
+# An absent identifier is reported as INFO, and this listing says exactly what
+# the running assistant says about the same state. Neither absence is a fault.
+# LM Studio unloads the LLM after an idle hour by design and model_loader loads
+# it again on the first question; a vision model is optional and INTERPRET_SCREEN
+# declines cleanly without one. Spending FAIL on either would teach the reader to
+# ignore the word. The one genuine failure here is an endpoint serving nothing.
 
 set -o pipefail
 
@@ -26,6 +31,7 @@ venv_python=$repo_dir/.venv/bin/python
 lms_bin_dir=$HOME/.lmstudio/bin
 
 log_ok()      { echo "OK   $*"; }
+log_info()    { echo "INFO $*"; }
 log_fail()    { echo "FAIL $*" >&2; }
 log_heading() { echo; echo "$*"; }
 
@@ -64,20 +70,23 @@ report_the_identifiers_the_assistant_asks_for() {
         log_fail "nothing is served at port $(read_llm_server_port); start it with 'lms server start'"
         return 1
     fi
-    report_one_identifier "$(read_assistant_setting llm_model)" "EXPLAIN and CLARIFY" "$served"
-    report_one_identifier "$(read_assistant_setting vision_llm_model)" "INTERPRET_SCREEN" "$served"
+    report_one_identifier "$(read_assistant_setting llm_model)" "EXPLAIN and CLARIFY" "$served" \
+        "it is loaded when it is first needed, which makes that one question slow"
+    report_one_identifier "$(read_assistant_setting vision_llm_model)" "INTERPRET_SCREEN" "$served" \
+        "INTERPRET_SCREEN declines instead of answering, and alt-cmd-S still archives screenshots"
 }
 
-# A missing identifier is reported as a failure and with its consequence,
-# because the consequence is not an error message: it is a plausible answer from
-# the wrong model.
+# Each identifier carries its own account of what an absence means, because the
+# two absences mean different things and neither is a fault. What must not be
+# said is that another model will answer instead: llm.py refuses an identifier
+# it cannot see before asking, so no user ever receives that substitution.
 report_one_identifier() {
-    local identifier=$1 used_by=$2 served=$3
+    local identifier=$1 used_by=$2 served=$3 when_absent=$4
     if grep -qxF "$identifier" <<< "$served"; then
         log_ok "$identifier is served, so $used_by will reach it"
         return 0
     fi
-    log_fail "$identifier is not served, so $used_by would be answered by whatever model is loaded"
+    log_info "$identifier is not served; $when_absent"
 }
 
 report_speech_models() {
