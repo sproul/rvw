@@ -109,6 +109,44 @@ class SuccessfulCaptureTest(ScreenshotTestCase):
         self.assertTrue(data_uri.startswith("data:image/png;base64,"))
 
 
+class HelperInvocationTest(ScreenshotTestCase):
+    """The python side must pass the chosen target and any window exclusion
+    through to the helper verbatim: the console's auto-hide mode depends on it."""
+
+    def install_recording_helper(self):
+        args_path = self.root / "helper_args.txt"
+        source = """#!/bin/sh
+printf '%%s\\n' "$@" > "%s"
+output=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --output) output=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf 'pretend png bytes' > "$output"
+echo '{"target":"display","application":"Terminal","window_title":"rvw","display_id":1}'
+""" % args_path
+        self.use_helper(source)
+        return args_path
+
+    def test_a_display_capture_with_an_excluded_window_passes_both_flags(self):
+        args_path = self.install_recording_helper()
+        screenshot.capture_screenshot(SESSION_EPOCH, now=CAPTURE_EPOCH,
+                                      target="display", exclude_window_id=4242)
+        self.assertEqual(["--output", "--target", "display",
+                          "--exclude-window-id", "4242"],
+                         [a for a in args_path.read_text().splitlines()
+                          if not a.endswith(".png")])
+
+    def test_a_plain_capture_sends_the_configured_target_and_no_exclusion(self):
+        args_path = self.install_recording_helper()
+        screenshot.capture_screenshot(SESSION_EPOCH, now=CAPTURE_EPOCH)
+        arguments = args_path.read_text().splitlines()
+        self.assertIn("frontmost", arguments)
+        self.assertNotIn("--exclude-window-id", arguments)
+
+
 class FailingCaptureTest(ScreenshotTestCase):
 
     def test_a_failing_helper_is_reported_with_its_own_diagnostic(self):

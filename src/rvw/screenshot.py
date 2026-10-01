@@ -37,12 +37,19 @@ class Screenshot:
     metadata: dict
 
 
-def capture_screenshot(session_started_epoch, now=None):
-    """Save one screenshot and its metadata; raise RuntimeError if nothing was saved."""
+def capture_screenshot(session_started_epoch, now=None, *,
+                       target=None, exclude_window_id=None):
+    """Save one screenshot and its metadata; raise RuntimeError if nothing was saved.
+
+    `target` overrides config.screenshot_target ("display" captures the whole
+    main display); `exclude_window_id` keeps one on-screen window out of a
+    display capture, which is how the console removes itself from its own shot.
+    """
     captured_epoch = time.time() if now is None else now
     image_path = screenshot_image_path(session_started_epoch, captured_epoch)
     image_path.parent.mkdir(parents=True, exist_ok=True)
-    helper_metadata = _run_capture_helper(image_path)
+    helper_metadata = _run_capture_helper(image_path, target or config.screenshot_target,
+                                          exclude_window_id)
     _require_image_was_written(image_path)
     metadata = _build_metadata(image_path, captured_epoch, helper_metadata)
     metadata_path = _write_metadata(image_path, metadata)
@@ -68,13 +75,15 @@ def _timestamp_with_milliseconds(epoch):
     return "%s.%03d" % (time.strftime(image_name_format, time.localtime(epoch)), milliseconds)
 
 
-def _run_capture_helper(image_path):
+def _run_capture_helper(image_path, target, exclude_window_id):
     """Run the Swift helper and return the metadata it printed as JSON."""
     if not Path(config.screen_capture_helper_path).exists():
         raise RuntimeError("missing screen capture helper %s; run helper/build.sh"
                            % config.screen_capture_helper_path)
     command = [str(config.screen_capture_helper_path), "--output", str(image_path),
-               "--target", config.screenshot_target]
+               "--target", target]
+    if exclude_window_id is not None:
+        command += ["--exclude-window-id", str(exclude_window_id)]
     finished = subprocess.run(command, capture_output=True,
                               timeout=config.screenshot_timeout_seconds)
     if finished.returncode != 0:

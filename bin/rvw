@@ -78,6 +78,12 @@ if [[ $1 == -here ]]; then
     run_in_this_terminal "$@"
 fi
 
+for argument in "$@"; do
+    if [[ $argument == --console ]]; then
+        run_in_this_terminal "$@"
+    fi
+done
+
 start_inside_the_app_bundle "$@"
 
 exit

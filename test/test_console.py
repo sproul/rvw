@@ -7,7 +7,9 @@ that context is cleared: only after a submit was actually queued.
 """
 
 import os
+import shutil
 import stat
+import subprocess
 import tempfile
 import threading
 import time
@@ -19,6 +21,8 @@ from rvw import config, screenshot
 from rvw.assistant import Assistant, parse_arguments
 from rvw.console import Console
 from rvw.transcript import TranscriptSegment
+
+repo_dir = Path(__file__).resolve().parents[1]
 
 
 class RecordingLlm:
@@ -49,8 +53,10 @@ class ConsoleTestCase(unittest.TestCase):
         self.root = Path(self.temporary_directory.name)
         self.saved_archive_dir = config.archive_dir
         self.saved_delay = config.console_capture_delay_seconds
+        self.saved_auto_hide = config.auto_hide_console
         config.archive_dir = self.root / "meetings"
         config.console_capture_delay_seconds = 0.0
+        config.auto_hide_console = False
         self.addCleanup(self.restore_configuration)
         self.assistant = Assistant([])
         self.assistant._log_path = self.root / "session.log"
@@ -63,11 +69,12 @@ class ConsoleTestCase(unittest.TestCase):
     def restore_configuration(self):
         config.archive_dir = self.saved_archive_dir
         config.console_capture_delay_seconds = self.saved_delay
+        config.auto_hide_console = self.saved_auto_hide
         self.temporary_directory.cleanup()
 
-    def _capture(self, session_epoch):
+    def _capture(self, session_epoch, target=None, exclude_window_id=None):
         shot = fake_screenshot("shot_%d.png" % (len(self.captures) + 1))
-        self.captures.append(shot)
+        self.captures.append((shot, target, exclude_window_id))
         return shot
 
     def _ocr(self, image_path):
@@ -300,7 +307,7 @@ class SubmitSemanticsTest(ConsoleTestCase):
         self.assertEqual([], self.console.pending)
 
     def test_a_capture_failure_is_reported_as_a_failure(self):
-        def failing_capture(session_epoch):
+        def failing_capture(session_epoch, target=None, exclude_window_id=None):
             raise RuntimeError("screen capture failed: permission denied")
         self.console = Console(self.assistant, capture=failing_capture, ocr_reader=self._ocr)
         reply = self.console.handle_line("s")
@@ -414,6 +421,32 @@ class SourceNoneTest(unittest.TestCase):
         self.assertEqual({}, assistant._streams)
         self.assertTrue(assistant._dispatcher.dispatch("STATUS").startswith("OK "))
 
+    def test_auto_hide_console_requires_the_console_flag(self):
+        with self.assertRaises(SystemExit):
+            parse_arguments(["--auto-hide-console"])
+        with self.assertRaises(SystemExit):
+            parse_arguments(["--no-auto-hide-console"])
+        arguments = parse_arguments(["--source", "none", "--console", "--auto-hide-console"])
+        self.assertTrue(arguments.auto_hide_console)
+
+    def test_the_console_hides_itself_by_default(self):
+        arguments = parse_arguments(["--source", "none", "--console"])
+        self.assertTrue(arguments.auto_hide_console)
+
+    def test_without_a_console_there_is_nothing_to_hide(self):
+        arguments = parse_arguments(["--source", "none"])
+        self.assertFalse(arguments.auto_hide_console)
+
+    def test_no_auto_hide_console_restores_the_delayed_switch(self):
+        arguments = parse_arguments(["--source", "none", "--console",
+                                     "--no-auto-hide-console"])
+        self.assertFalse(arguments.auto_hide_console)
+
+    def test_the_hide_flags_are_mutually_exclusive(self):
+        with self.assertRaises(SystemExit):
+            parse_arguments(["--console", "--auto-hide-console",
+                             "--no-auto-hide-console"])
+
     def test_source_none_does_not_start_the_speech_pipeline(self):
         assistant = Assistant([])
         assistant._recognizer = MagicMock()
@@ -461,6 +494,201 @@ class CaptureDelayTest(ConsoleTestCase):
         started = time.monotonic()
         self.console.handle_line("s")
         self.assertGreaterEqual(time.monotonic() - started, 0.05)
+
+    def test_the_delayed_capture_uses_the_configured_target_and_no_exclusion(self):
+        self.console.handle_line("s")
+        _, target, excluded = self.captures[0]
+        self.assertIsNone(target)
+        self.assertIsNone(excluded)
+
+
+class AutoHideConsoleTest(ConsoleTestCase):
+    """`--auto-hide-console`: minimize ONLY the console window through
+    Hammerspoon, capture the whole main display at once, then put the window
+    back -- even when the capture fails."""
+
+    def setUp(self):
+        super().setUp()
+        config.auto_hide_console = True
+        config.console_capture_delay_seconds = 60.0
+        self.events = []
+        self.console = Console(self.assistant, capture=self._recording_capture,
+                               ocr_reader=self._ocr, hs_runner=self._hs)
+
+    @property
+    def hs_calls(self):
+        return [script for event, script in self.events if event == "hs"]
+
+    def _hs(self, script):
+        self.events.append(("hs", script))
+        if "minimize" in script and "unminimize" not in script:
+            return "4242"
+        return ""
+
+    def _recording_capture(self, session_epoch, target=None, exclude_window_id=None):
+        self.events.append(("capture", ""))
+        return self._capture(session_epoch, target=target,
+                             exclude_window_id=exclude_window_id)
+
+    def test_s_minimizes_captures_the_display_and_restores(self):
+        reply = self.console.handle_line("s")
+        self.assertTrue(reply.startswith("OK "), reply)
+        self.assertEqual(2, len(self.hs_calls))
+        self.assertIn("minimize", self.hs_calls[0])
+        self.assertIn("unminimize", self.hs_calls[1])
+        self.assertIn("4242", self.hs_calls[1])
+        self.assertEqual(["hs", "capture", "hs"],
+                         [event for event, _ in self.events])
+        _, target, excluded = self.captures[0]
+        self.assertEqual("display", target)
+        self.assertEqual(4242, excluded)
+
+    def test_a_window_id_that_is_not_numeric_never_reaches_capture(self):
+        def gibberish(script):
+            self.events.append(("hs", script))
+            return "not-a-window-id"
+        self.console = Console(self.assistant, capture=self._recording_capture,
+                               ocr_reader=self._ocr, hs_runner=gibberish)
+        reply = self.console.handle_line("s")
+        self.assertTrue(reply.startswith("FAIL "), reply)
+        self.assertEqual(["hs"], [event for event, _ in self.events])
+        self.assertEqual([], self.captures)
+
+    def test_a_restore_failure_is_reported_even_when_the_capture_failed(self):
+        def failing(session_epoch, target=None, exclude_window_id=None):
+            self.events.append(("capture", ""))
+            raise RuntimeError("capture exploded")
+        self.console = Console(self.assistant, capture=failing, ocr_reader=self._ocr,
+                               hs_runner=self._flapping)
+        reply = self.console.handle_line("s")
+        self.assertTrue(reply.startswith("FAIL "), reply)
+        self.assertIn("restor", reply.lower())
+        self.assertEqual(["hs", "capture", "hs"],
+                         [event for event, _ in self.events])
+
+    def _flapping(self, script):
+        self.events.append(("hs", script))
+        if "minimize" in script and "unminimize" not in script:
+            return "4242"
+        raise RuntimeError("the window is gone")
+
+    def test_upper_case_s_submits_after_the_same_capture(self):
+        self.assertTrue(self.console.handle_line("S").startswith("OK "))
+        self.assertEqual(1, len(self.wait_for_one_answer()))
+        _, target, excluded = self.captures[0]
+        self.assertEqual("display", target)
+        self.assertEqual(4242, excluded)
+
+    def test_a_capture_failure_still_restores_the_window(self):
+        def failing(session_epoch, target=None, exclude_window_id=None):
+            raise RuntimeError("capture exploded")
+        self.console = Console(self.assistant, capture=failing, ocr_reader=self._ocr,
+                               hs_runner=self._hs)
+        reply = self.console.handle_line("s")
+        self.assertTrue(reply.startswith("FAIL "), reply)
+        self.assertEqual(2, len(self.hs_calls), "the restore never ran")
+        self.assertIn("unminimize", self.hs_calls[1])
+
+    def test_without_hammerspoon_nothing_is_captured(self):
+        def no_hs(script):
+            raise RuntimeError("Hammerspoon 'hs' is not on PATH")
+        self.console = Console(self.assistant, capture=self._capture, ocr_reader=self._ocr,
+                               hs_runner=no_hs)
+        reply = self.console.handle_line("s")
+        self.assertTrue(reply.startswith("FAIL "), reply)
+        self.assertIn("hs", reply)
+        self.assertEqual([], self.captures, "captured anyway without hiding the console")
+        self.assertEqual([], self.console.pending)
+
+    def test_a_frontmost_window_that_cannot_minimize_captures_nothing(self):
+        def stubborn(script):
+            raise RuntimeError("the frontmost window cannot be minimized")
+        self.console = Console(self.assistant, capture=self._capture, ocr_reader=self._ocr,
+                               hs_runner=stubborn)
+        reply = self.console.handle_line("s")
+        self.assertTrue(reply.startswith("FAIL "), reply)
+        self.assertEqual([], self.captures)
+
+    def test_a_restore_failure_is_reported_not_claimed_as_success(self):
+        self.console = Console(self.assistant, capture=self._recording_capture,
+                               ocr_reader=self._ocr, hs_runner=self._flapping)
+        reply = self.console.handle_line("s")
+        self.assertTrue(reply.startswith("FAIL "), reply)
+        self.assertIn("restor", reply.lower())
+
+
+class LauncherRoutingTest(unittest.TestCase):
+    """`bin/rvw` decides where the assistant runs. A console belongs in this
+    terminal -- it is the terminal that owns the window to hide -- so `--console`
+    anywhere in the arguments takes the in-terminal route just like `-here`."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="rvw-launcher-"))
+        self.addCleanup(shutil.rmtree, self.root)
+        for relative in ("bin", ".venv/bin", "util", "helper", "stub_bin"):
+            (self.root / relative).mkdir(parents=True)
+        shutil.copy(repo_dir / "bin/rvw", self.root / "bin/rvw")
+        self._stand_in(".venv/bin/python", 'printf "PYTHON %s\\n" "$@"\n')
+        self._stand_in("bin/audio_capture", "")
+        self._stand_in("util/ffmpeg_env.sh",
+                       "add_ffmpeg_libs_to_dyld_path() { return 0; }\n")
+        self._stand_in("helper/build_app.sh", "exit 0\n")
+        self._stand_in("stub_bin/open", """
+            opened=""
+            app=""
+            while [ $# -gt 0 ]; do
+              case "$1" in
+                -a) app=$2; shift 2 ;;
+                --args) shift; opened="$*"; break ;;
+                *) shift ;;
+              esac
+            done
+            echo "started rvw as pid 4242" > "$(dirname "$(dirname "$app")")/var/log/rvw.launcher.log"
+            echo "OPENED $app $opened"
+        """)
+
+    def _stand_in(self, relative, body):
+        path = self.root / relative
+        path.write_text("#!/bin/bash\n" + body, encoding="utf-8")
+        path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    def launch(self, *arguments):
+        environment = dict(os.environ)
+        environment["PATH"] = "%s:%s" % (self.root / "stub_bin", environment["PATH"])
+        return subprocess.run(["bash", str(self.root / "bin/rvw"), *arguments],
+                              capture_output=True, text=True, timeout=30,
+                              env=environment)
+
+    def test_a_plain_invocation_still_starts_inside_the_app_bundle(self):
+        finished = self.launch("--listen")
+        self.assertEqual(0, finished.returncode, finished.stderr)
+        self.assertIn("OPENED", finished.stdout)
+        self.assertIn("rvw.app", finished.stdout)
+        self.assertIn("--listen", finished.stdout)
+        self.assertNotIn("PYTHON", finished.stdout)
+
+    def test_dash_here_runs_the_daemon_in_this_terminal(self):
+        finished = self.launch("-here", "--debug")
+        self.assertEqual(0, finished.returncode, finished.stderr)
+        self.assertNotIn("OPENED", finished.stdout)
+        arguments = [line[7:] for line in finished.stdout.splitlines()
+                     if line.startswith("PYTHON ")]
+        self.assertEqual(["-m", "rvw.assistant", "--debug"], arguments)
+
+    def test_console_runs_in_this_terminal_wherever_it_appears(self):
+        finished = self.launch("--source", "none", "--console")
+        self.assertEqual(0, finished.returncode, finished.stderr)
+        self.assertNotIn("OPENED", finished.stdout)
+        arguments = [line[7:] for line in finished.stdout.splitlines()
+                     if line.startswith("PYTHON ")]
+        self.assertEqual(["-m", "rvw.assistant", "--source", "none", "--console"],
+                         arguments)
+
+    def test_a_console_substring_is_not_a_console_flag(self):
+        finished = self.launch("--consoled")
+        self.assertEqual(0, finished.returncode, finished.stderr)
+        self.assertIn("OPENED", finished.stdout)
+        self.assertNotIn("PYTHON", finished.stdout)
 
 
 if __name__ == "__main__":

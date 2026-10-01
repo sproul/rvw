@@ -41,11 +41,13 @@ func die(_ message: String) -> Never {
 struct CaptureRequest {
     let output_path: String
     let target: String
+    let exclude_window_id: CGWindowID?
 }
 
 func parse_arguments() -> CaptureRequest {
     var output_path = ""
     var target = "frontmost"
+    var exclude_window_id: CGWindowID? = nil
     var arguments = Array(CommandLine.arguments.dropFirst())
     while let flag = arguments.first {
         arguments.removeFirst()
@@ -54,6 +56,11 @@ func parse_arguments() -> CaptureRequest {
         switch flag {
         case "--output": output_path = value
         case "--target": target = value
+        case "--exclude-window-id":
+            guard let window_id = CGWindowID(value), window_id > 0 else {
+                die("--exclude-window-id wants a positive window id, not \(value)")
+            }
+            exclude_window_id = window_id
         default: die(usage_message)
         }
     }
@@ -61,10 +68,11 @@ func parse_arguments() -> CaptureRequest {
     guard target == "frontmost" || target == "display" else {
         die("unknown target \(target); expected frontmost or display")
     }
-    return CaptureRequest(output_path: output_path, target: target)
+    return CaptureRequest(output_path: output_path, target: target,
+                          exclude_window_id: exclude_window_id)
 }
 
-let usage_message = "usage: screen_capture --output <path.png> [--target frontmost|display]"
+let usage_message = "usage: screen_capture --output <path.png> [--target frontmost|display] [--exclude-window-id <id>]"
 
 // MARK: - png output
 
@@ -170,11 +178,19 @@ func capture_frontmost_window(_ content: SCShareableContent) async -> Capture {
     return Capture(image: image, metadata: window_metadata(window, image))
 }
 
-func capture_main_display(_ content: SCShareableContent) async -> Capture {
+func excluded_windows(in content: SCShareableContent, id: CGWindowID?) -> [SCWindow] {
+    guard let id else { return [] }
+    return content.windows.filter { $0.windowID == id }
+}
+
+func capture_main_display(_ content: SCShareableContent,
+                          exclude_window_id: CGWindowID?) async -> Capture {
     let display = main_display(in: content)
+    let excluded = excluded_windows(in: content, id: exclude_window_id)
     let image = await capture_image(filter: SCContentFilter(display: display,
-                                                            excludingWindows: []))
-    log_ok("captured the whole main display, as asked")
+                                                            excludingWindows: excluded))
+    log_ok("captured the whole main display, as asked"
+           + (excluded.isEmpty ? "" : ", minus window \(excluded[0].windowID)"))
     return Capture(image: image, metadata: display_metadata(display, image))
 }
 
@@ -217,7 +233,8 @@ struct ScreenCaptureTool {
         let content = await shareable_content()
         let capture = request.target == "frontmost"
             ? await capture_frontmost_window(content)
-            : await capture_main_display(content)
+            : await capture_main_display(content,
+                                         exclude_window_id: request.exclude_window_id)
         write_png(capture.image, to: request.output_path)
         print_metadata(capture.metadata)
     }

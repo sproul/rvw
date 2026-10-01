@@ -274,6 +274,33 @@ bin/rvwctl QUIT
 `SEARCH` and `RECALL` take free text, which is why they are commands rather than
 hotkeys. Every reply is a single line beginning `OK ` or `FAIL `.
 
+### The console
+
+```bash
+bin/rvw --source none --console
+```
+
+runs the assistant in this terminal (`--console` implies `-here`, which on its
+own remains the way to run in-terminal without a console for debugging) with an
+`rvw> ` prompt: `s` takes a
+screenshot and queues its OCR text, `S` queues and asks the model, `c TEXT` /
+`C TEXT` do the same for a typed comment, `send` resubmits after a busy reply,
+`pl` / `pN` choose the prompt, `:STATUS` and friends reach every socket
+command, `q` quits. Software capture reads the screen, so the terminal running
+it needs Screen Recording permission.
+
+For `s`/`S` the console hides itself by default: Hammerspoon (`hs -c`, so
+Hammerspoon must be running with Accessibility permission) minimizes only the
+console's own window, the helper captures the whole main display (including
+whatever other windows are visible) while excluding the hidden one by id, and
+the window is put back and focused afterwards, even if the capture failed.
+Missing Hammerspoon or a window that will not minimize is a FAIL and no capture
+happens at all. `--no-auto-hide-console` opts back into the old behaviour: the
+window stays, and the screenshot instead pauses `console_capture_delay_seconds`
+(2 s) to leave time for a Cmd-Tab back to the window of interest, which is the
+right choice when Hammerspoon is not running or minimizing the terminal would
+be disruptive.
+
 ### The other scripts
 
 ```bash

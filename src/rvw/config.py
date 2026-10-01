@@ -185,6 +185,7 @@ ocr_timeout_seconds = 30.0
 # Typing in the console terminal makes that terminal frontmost, so a console
 # screenshot pauses to let a Cmd-Tab back to the window of interest land first.
 console_capture_delay_seconds = 2.0
+auto_hide_console = False
 
 
 def require_known_stream(stream_name):

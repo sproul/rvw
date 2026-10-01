@@ -537,13 +537,29 @@ def parse_arguments(argv):
                         help="start capturing immediately instead of waiting for the hotkey")
     parser.add_argument("--console", action="store_true",
                         help="read console commands from this terminal (rvw> prompt)")
+    hide_flags = parser.add_mutually_exclusive_group()
+    hide_flags.add_argument("--auto-hide-console", dest="auto_hide_console",
+                            action="store_true", default=None,
+                            help="with --console, minimize this terminal's window and "
+                                 "capture the whole display (the default)")
+    hide_flags.add_argument("--no-auto-hide-console", dest="auto_hide_console",
+                            action="store_false",
+                            help="with --console, keep the window and wait "
+                                 "console_capture_delay_seconds for a Cmd-Tab instead")
     parser.add_argument("--debug", action="store_true", help="verbose logging")
-    return parser.parse_args(argv)
+    arguments = parser.parse_args(argv)
+    if arguments.auto_hide_console is not None and not arguments.console:
+        parser.error("--auto-hide-console/--no-auto-hide-console "
+                     "only make sense with --console")
+    if arguments.auto_hide_console is None:
+        arguments.auto_hide_console = arguments.console
+    return arguments
 
 
 def main(argv=None):
     arguments = parse_arguments(argv)
     config.debug_mode = arguments.debug
+    config.auto_hide_console = arguments.auto_hide_console
     stream_names = (all_stream_names if arguments.source == "both"
                     else [] if arguments.source == "none"
                     else [arguments.source])

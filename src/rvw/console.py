@@ -18,6 +18,7 @@ text the Vision helper extracted, and the request header says so.
 """
 
 import select
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -74,13 +75,15 @@ class _PendingItem:
 class Console:
     """Read lines, keep an ordered pending context, submit it on the capitals."""
 
-    def __init__(self, assistant, capture=None, ocr_reader=None, input_stream=None):
+    def __init__(self, assistant, capture=None, ocr_reader=None, input_stream=None,
+                 hs_runner=None):
         self._assistant = assistant
         # The capture seam is this one attribute: software capture today, a HDMI
         # UVC grabber later, and a stub in tests.
         self._capture = capture or self._software_capture
         self._ocr = ocr_reader or ocr.ocr_text_of
         self._input_stream = input_stream or sys.stdin
+        self._hs = hs_runner or self._run_hammerspoon
         self.pending = []
         self.selected_prompt = 1
         self._screenshot_count = 0
@@ -158,7 +161,7 @@ class Console:
     def _capture_and_append(self, submit):
         """Archive a screenshot, OCR it, queue the text; a failure queues nothing."""
         try:
-            saved = self._capture_with_switch_delay()
+            saved = self._capture_for_console()
             text = self._ocr(saved.image_path).strip()
         except Exception as error:
             return "FAIL %s" % error
@@ -171,6 +174,11 @@ class Console:
             submit, "screenshot %d queued as %s" % (self._screenshot_count,
                                                     saved.image_path.name))
 
+    def _capture_for_console(self):
+        if config.auto_hide_console:
+            return self._capture_with_hidden_console()
+        return self._capture_with_switch_delay()
+
     def _capture_with_switch_delay(self):
         """Typing in this terminal makes it frontmost; give Cmd-Tab a moment."""
         delay = config.console_capture_delay_seconds
@@ -180,9 +188,68 @@ class Console:
             time.sleep(delay)
         return self._capture(self._assistant._session_started_epoch)
 
+    def _capture_with_hidden_console(self):
+        """Minimize only this window, capture the whole display, put it back.
+
+        Hammerspoon does the window work over `hs -c`. No delay: the window is
+        gone before the helper runs, and --exclude-window-id keeps it out even
+        if it is still animating. Anything that cannot be hidden means no
+        capture at all -- taking the shot anyway would photograph the console
+        the user explicitly asked to hide.
+        """
+        window_id = self._minimize_frontmost_window()
+        try:
+            return self._capture(self._assistant._session_started_epoch,
+                                 target="display", exclude_window_id=window_id)
+        finally:
+            self._restore_minimized_window(window_id)
+
+    def _minimize_frontmost_window(self):
+        output = self._hs(
+            'local w = hs.window.frontmostWindow(); '
+            'assert(w ~= nil, "no frontmost window"); '
+            'local id = w:id(); '
+            'assert(type(id) == "number" and id > 0, "the frontmost window has no usable id"); '
+            'assert(w:minimize(), "the frontmost window cannot be minimized"); '
+            'print(id)')
+        try:
+            return int(output.strip())
+        except ValueError:
+            raise RuntimeError("Hammerspoon minimized a window but reported %r, "
+                               "not its window id" % output.strip()[:100])
+
+    def _restore_minimized_window(self, window_id):
+        """Unminimize and refocus; a failure here is raised, not claimed away."""
+        try:
+            self._hs(
+                'local w = hs.window.get(%d); '
+                'assert(w ~= nil, "the window is gone"); '
+                'assert(w:unminimize(), "the window would not unminimize"); '
+                'w:focus()' % window_id)
+        except Exception as error:
+            raise RuntimeError("the console window %s could not be restored: %s"
+                               % (window_id, error))
+
     @staticmethod
-    def _software_capture(session_epoch):
-        return screenshot.capture_screenshot(session_epoch)
+    def _run_hammerspoon(script):
+        """One `hs -c` snippet: stdout on success, RuntimeError on any failure."""
+        try:
+            finished = subprocess.run(["hs", "-c", script], capture_output=True,
+                                      timeout=10)
+        except FileNotFoundError:
+            raise RuntimeError("Hammerspoon's 'hs' command is not installed; "
+                               "without it the console cannot hide its own window")
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Hammerspoon did not answer within 10s")
+        if finished.returncode != 0:
+            detail = finished.stderr.decode("utf-8", "replace").strip()
+            raise RuntimeError("Hammerspoon refused: %s" % (detail or "no diagnostic"))
+        return finished.stdout.decode("utf-8", "replace")
+
+    @staticmethod
+    def _software_capture(session_epoch, target=None, exclude_window_id=None):
+        return screenshot.capture_screenshot(session_epoch, target=target,
+                                             exclude_window_id=exclude_window_id)
 
     def _maybe_submit(self, submit, append_reply):
         if not submit:

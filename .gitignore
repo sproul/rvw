@@ -1,4 +1,5 @@
 .venv/
+/midnight*
 .speech_selftest.wav
 __pycache__/
 *.pyc
