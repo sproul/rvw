@@ -6,3 +6,4 @@ bin/audio_capture
 bin/screen_capture
 bin/rvw.app/
 var/
+bin/ocr_image

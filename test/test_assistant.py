@@ -68,11 +68,18 @@ class AssistantCommandTestCase(unittest.TestCase):
         config.index_db_path = self.root / "index" / "meetings.db"
         self.addCleanup(self.restore_configuration)
         self.assistant = Assistant(["system"])
+        # Answers write to the session log asynchronously; give the worker a
+        # real file so a passing test does not log FAIL over a None path.
+        self.assistant._log_path = self.root / "session.log"
         self.llm = RecordingLlm()
         self.assistant._llm = self.llm
         self.assistant._vision_llm = self.llm
 
     def restore_configuration(self):
+        # An answer still streaming would outlive the temporary directory;
+        # the lock is held for the whole answer, so taking it waits it out.
+        with self.assistant._answering:
+            pass
         config.archive_dir = self.saved_archive_dir
         config.screen_capture_helper_path = self.saved_helper_path
         config.index_db_path = self.saved_index_db

@@ -1,0 +1,331 @@
+TESTING STRATEGY
+================
+How each part of rvw is verified, what can be tested in isolation and what
+cannot, and the manual procedures for the parts that need a real Mac, a real
+permission or a real model. README.md is the overview of the system itself.
+
+    util/run_tests.sh                    the whole suite, 217 tests, about 20s
+    util/run_tests.sh -k segmenter       one component
+
+
+The three layers, and why there are three
+-----------------------------------------
+1. Unit tests over the python modules. Fast, hermetic, and the bulk of the
+   suite. Nothing here starts a model, opens a socket to a real endpoint, asks
+   for a permission or touches the real archive.
+2. Shell function tests over the util/ scripts. The installers and probes are
+   sourced for their functions and driven against stand-in commands, so the
+   logic in them is tested without running lms, launchctl or tccutil.
+3. Manual end to end verification, listed at the end of this file. Some things
+   can only be proved by a person: a permission prompt, a hotkey, whether an
+   explanation is any good.
+
+The layering is deliberate. Everything that can be pulled down into layer 1 has
+been, because layer 3 costs a person twenty minutes and cannot be run in a loop.
+The seams that make that possible are named component by component below.
+
+
+What makes isolation possible
+-----------------------------
+Four seams do nearly all the work, and any new code should use them rather than
+inventing a fifth:
+
+  A helper is a subprocess at a configurable path.  config.capture_helper_path
+  and config.screen_capture_helper_path are module level, so a test points them
+  at a small stand-in script that prints the metadata a real helper would print,
+  or exits non-zero to be the failing case. No Swift, no permission, no window.
+
+  Every path is derived from config.  RVW_ARCHIVE_DIR and RVW_INDEX_DB, and the
+  module level variables behind them, are reassigned in setUp to a temporary
+  directory. Nothing a test does can reach the real var/meetings.
+
+  Time is a parameter.  RollingTranscript.render_window, screenshot capture and
+  the archive all take the current time as an argument rather than reading the
+  clock. A test asserts on an exact window boundary instead of sleeping.
+
+  The transcript offers each accepted utterance to a sink.  Retention hangs off
+  that one funnel, so the archive can be tested with hand made segments and the
+  transcript can be tested with a recording sink, neither needing the other.
+
+  A shell script's functions can be sourced.  Every util/ script guards its
+  entry point with [[ ${BASH_SOURCE[0]} == "$0" ]], so sourcing defines the
+  functions and does nothing else. test/shell_script_testing.py makes a copy
+  truncated at the bare "exit" that ends each script - sourcing that exit would
+  end the test's own shell and every assertion would then pass without testing
+  anything - inside a stand-in repository whose util/ is a copy and whose other
+  directories are symlinks to the real ones, so the script still resolves src/
+  and .venv/ above itself. A directory of stand-in commands goes ahead of the
+  real ones on PATH, and $HOME is moved, which is how a test drives a script
+  that shells out to lms or launchctl without either being installed.
+
+
+Component by component
+----------------------
+
+segmenter - test_segmenter.py, 9 tests
+  Pure function of an array of samples, so it is tested with synthesised audio
+  and nothing else. What is asserted: speech followed by enough silence closes
+  an utterance; silence alone produces none; an over-long utterance is cut at
+  the maximum; steady low level noise and a short blip are discarded as noise,
+  which is the gate that stops Whisper inventing "Thank you."; speech still
+  unclosed at the end of capture is flushed; and the size of the blocks the
+  audio arrives in does not change the result, because the timing comes from the
+  sample count rather than from a clock reading. This is the component where a
+  unit test is worth most, because
+  its failures are subtle and never look like errors - they look like a slightly
+  wrong transcript.
+
+transcript - test_transcript.py, 10 tests
+  In-memory and clock-injected. Window boundaries, chronological interleaving of
+  the two streams, pruning at the retention horizon, rejection of a blank
+  recognition and of an unknown stream name, and the rendering that the prompts
+  are built from. A second class covers the sink contract on its own: every
+  accepted utterance is offered exactly once, a blank one and one from an
+  unknown stream are not offered at all. That contract is what Phase 3 hangs
+  off, so it is asserted from the transcript's side as well as the archive's.
+
+meeting_archive - test_meeting_archive.py, 23 tests
+  The property asserted first is the negative one: in ephemeral mode nothing
+  whatever reaches the disk, and a session never asked to be kept leaves no
+  directory. Then the canonical file: one JSON object per utterance, appended
+  and never rewritten, each line carrying its own speaker label and local time;
+  transcript.md derived from it and rebuilt from it; metadata.json holding what
+  the transcript cannot say about itself. Then the decisions: switching
+  retention on is not retrospective, switching it on again appends rather than
+  truncating, switching it off leaves what is written, an utterance from an
+  unknown stream is fatal rather than a written line, and a damaged transcript
+  line stops the reader naming the file and the line number rather than being
+  skipped.
+
+meeting_index - test_meeting_index.py, 18 tests
+  Built over a synthetic archive of transcript.jsonl files written by the test,
+  so it is fast and needs no meeting. The disposability is asserted directly:
+  a rebuilt index over the same transcripts gives the same answers, and a
+  deleted index comes back. Also: an ephemeral meeting contributes nothing
+  because there is no canonical file to authorise; a meeting with "index": false
+  in its metadata is excluded; a query full of punctuation is quoted into a safe
+  FTS MATCH string rather than surfacing a syntax error; BM25 puts the passage
+  matching more of the words first; a hit carries the meeting, the date, the
+  passage timestamp, the words and the screenshots captured within
+  screenshot_association_seconds of it in the same directory.
+
+recall - test_recall.py, 12 tests
+  Formatting only, and therefore trivially isolated: the numbered passages block
+  handed to the model, and the source list printed to me, carry the same [n]
+  tags, so an answer that cites [2] can be traced to the second source shown. A
+  citation names the meeting, the date and the time, because a reference that
+  cannot be found is not a reference.
+
+prompts - test_prompts.py, 16 tests
+  The prompts are data, so the tests assert their shape rather than their taste:
+  an empty transcript window raises instead of asking the model about nothing, a
+  missing image raises, the transcript framing is present, and the messages have
+  the roles and order the endpoint expects. Whether a prompt produces a good
+  answer is not a unit test; that is the bench and the manual runs below.
+
+llm - test_llm.py, 11 tests
+  Driven against a stub HTTP layer, so no endpoint is needed. Both guards
+  against the endpoint's model substitution are tested separately, because
+  either alone can be defeated: the check that the identifier is served before
+  anything is asked, and the check of the answering model named in each streamed
+  chunk. Also: reasoning tokens are kept out of the answer and returned only
+  through the reasoning callback; an answer that arrived only on the reasoning
+  channel is still returned rather than lost; the empty-<think> prefill is
+  appended for the text model and not for the vision model.
+
+model_loader - test_model_loader.py, 8 tests
+  Loading a model really costs minutes and twenty gigabytes, so nothing here
+  runs lms: run_lms is a module level function precisely so a test can stand in
+  for it and record the command that would have been run. Asserted: a model
+  already served is not loaded again; an unloaded one is, with the identifier,
+  context length and idle timeout from config; the lms model key is resolved
+  from the listing rather than guessed; a failing lms becomes a ModelLoadError
+  naming the installer.
+
+config - test_config.py, 9 tests
+  One setting differs per machine and it decides whether the assistant is usable
+  at all, so it is tested as a function rather than read as a constant:
+  hostname normalisation (m4, m4.local and m4.lan are one machine), the per host
+  table, the default for a machine not in it, and RVW_LLM_SOURCE_MODEL
+  overriding - with set-but-empty counting as saying nothing, because that is
+  how an unset variable arrives from a launchd plist.
+
+commands - test_commands.py, 8 tests
+  The dispatcher is transport independent, so it is tested with no transport:
+  registration, case insensitivity, argument splitting, the OK/FAIL reply
+  shape, an unknown command listing the known ones, and a handler that raises
+  becoming a FAIL line rather than taking the daemon down.
+
+screenshot - test_screenshot.py, 10 tests
+  The Swift helper needs a permission and a real window, so the python side is
+  driven against a stand-in helper script at config.screen_capture_helper_path.
+  Asserted: where the image lands in the session directory, the millisecond
+  naming that lets a burst not collide, the sidecar JSON merging what the helper
+  saw with what only the assistant knows, and a failing capture being reported
+  rather than hidden.
+
+audio_source - test_audio_source.py, 3 tests
+  The same stand-in trick for the capture helper. The case that matters is the
+  one a real permission failure produces: a helper that exits immediately must
+  make start() raise, so the command that started it reports FAIL instead of
+  answering OK about a stream that is not running. A missing helper binary names
+  helper/build.sh.
+
+assistant - test_assistant.py, 32 tests
+  Command wiring and the states the commands leave behind, not the quality of an
+  answer: every command up to Phase 3 is registered; an ephemeral session says
+  so and never writes the speech it hears; retention writes what follows it and
+  not what preceded it; SCREENSHOT reports where the image went and calls no
+  model at all; INTERPRET_SCREEN still reports the archived image when no vision
+  model is loaded, and asks no other model to stand in for it; CLARIFY without
+  speech fails instead of asking the model nonsense; SEARCH and RECALL refuse an
+  empty query, say so plainly when nothing matches, and RECALL never calls the
+  model when there is nothing to ground it on. Capture, recognition and the
+  model client are covered in their own tests or need real hardware.
+
+app bundle - test_app_bundle.py, 12 tests
+  bin/rvw.app is what owns the macOS permissions, and its permanence is fragile:
+  an ad hoc signature is pinned to the exact bytes of the launcher, so a rebuild
+  voids every grant. Asserted: the launcher is where the Info.plist says it is,
+  the bundle identifies itself as a background application, every permission the
+  assistant needs has a usage description, the signature verifies, and -- the
+  point of the file -- rebuilding leaves the signature alone so the grants
+  survive. A second class covers the launcher's own contract: it runs the named
+  program from bin/, passes the remaining arguments through, records the pid and
+  the exit status in a log it empties at each launch, and refuses a program name
+  that escapes the bin directory.
+
+permission probes - test_permission_probe.py, 7 tests
+  The probes are the only source of truth about the permissions, because there
+  is no API that answers the question, so a probe that lies is worse than no
+  probe. These exist because of a real lie that lasted days: both audio probes
+  read var/log/audio_capture.launcher.log, the launcher outlives its helper by
+  the moment it takes to record the exit, and the previous launcher's exit line
+  landed in the log the next probe had just emptied, so whichever audio probe
+  ran second always reported its permission missing. The tests drive the sourced
+  probe functions against stand-in logs: sourcing the script probes nothing and
+  says nothing while executing it still runs the probes; the success phrase and
+  a refusal each end the wait at once; stopping a helper waits until its
+  launcher has reported the exit, and a helper that had already exited needs no
+  waiting. Anything that reads a log another process is still writing needs the
+  same test.
+
+start_llm_server - test_start_llm_server.py, 8 tests
+  The properties that only fail after a reboot, which is why they are tested
+  rather than tried by hand: lms is invoked by the absolute path from config and
+  not found on PATH - a decoy lms on PATH proves it, because a bare lms works in
+  every hand test and is missing at the one moment that matters; a running
+  daemon and a server already on the configured port are left alone, because
+  the script runs at every login; a stopped one is started, and a server
+  listening on the wrong port is moved to the configured one. A missing lms says
+  how to install it, and dry mode starts nothing.
+
+init_llm_autostart - test_init_llm_autostart.py, 9 tests
+  The agent's only failure mode is silence, so the generated plist is parsed
+  rather than matched as text: it is written where launchd looks for it, it runs
+  the start script of this checkout, it runs at login and is not kept alive, its
+  output goes to the repository log directory, and it is not left writable by
+  anyone else. Installing it again changes nothing and booting out an agent that
+  was never loaded is not a failure, because util/init.sh reruns the installer
+  every time. Dry mode writes no plist and calls no launchctl.
+
+list_models - test_list_models.py, 12 tests
+  Driven against stand-in lms and a stand-in Hugging Face cache. Both model
+  stores are listed, because a listing that showed only the LM Studio one would
+  look complete without being complete, and an absent identifier is reported
+  INFO in exactly the words the running assistant uses for the same state. The
+  one genuine failure is an endpoint serving nothing.
+
+
+What has no unit test, and why
+------------------------------
+  helper/*.swift          Core Audio, AVAudioEngine and ScreenCaptureKit against
+                          a real permission and a real window. Covered by the
+                          manual procedures below and by the permission probes.
+  asr.py                  a thin wrapper over mlx_whisper; a test would assert
+                          that the library was called, which is worth nothing.
+                          Its real verification is the warm-up timing in the
+                          start-up log and the manual recognition run.
+  recognizer.py           a queue and a thread around asr and transcript, both
+                          of which are tested. Worth a test if it grows logic.
+  control.py              a unix socket around the dispatcher, which is tested.
+                          Exercised for real by every bin/rvwctl command.
+  session_log.py          logging configuration.
+  init_local_models.sh    it downloads twenty gigabytes and builds a venv; the
+                          settings it reads out of config.py are tested through
+                          assistant_settings.sh in the other script tests.
+  bin/rvwctl              stdlib-only client, exercised by every manual step.
+  rvw_hotkeys.lua         needs Hammerspoon and a real key press.
+
+
+Manual verification
+-------------------
+Run these after a change to the helpers, the permissions, the bundle or the
+model choice - and note the result in the relevant doc/phase file, which is
+where the previous runs are recorded.
+
+  Permissions
+    util/init_permissions.sh
+    Expect all four granted. Run it twice: the second run catches a probe
+    reading the previous probe's verdict, which is the bug that hid for days.
+
+  Screen capture
+    bin/screen_capture --output /tmp/shot.png --target frontmost
+    Three times in quick succession from the assistant, and check that three
+    PNGs with distinct millisecond names and three complete sidecar JSON files
+    landed in the session directory.
+
+  Recognition, both streams
+    bin/rvw --source both --listen, then say something into the microphone and
+    play speech through the speakers ("say" is enough). Expect two labelled
+    streams, "me" and "them", within about ten seconds of speaking. The
+    microphone as a transcript stream is the one still unverified on the M4.
+
+  EXPLAIN and CLARIFY
+    Play a passage with some jargon in it, press alt-cmd-E, then alt-cmd-C.
+    Judge the answer, and time it: the model sizing decision lives on those
+    seconds. CLARIFY should be terse and in its fixed three-part shape; if it
+    rambles, the prompt has stopped holding the model, which is the failure mode
+    of a model whose thinking channel is closed.
+
+  Retention
+    An ephemeral session must leave var/meetings untouched - check that first.
+    Then alt-cmd-T, speak, QUIT, and check transcript.jsonl, metadata.json and
+    the rendered transcript.md.
+
+  Search and recall
+    util/rebuild_index.sh, then bin/rvwctl SEARCH <words> and bin/rvwctl RECALL
+    <question>. Delete var/index/meetings.db, rebuild, and confirm the same
+    answers: that is the property that makes the index disposable. Check that
+    each printed source can actually be opened.
+
+  Hotkeys
+    Every key in hammerspoon/rvw_hotkeys.lua, actually pressed. A command sent
+    with bin/rvwctl reaches the same dispatcher entry but proves nothing about
+    the binding. The two screenshot keys must show nothing on success.
+
+  A model, before it is chosen
+    util/bench_model.sh <served-model-id>, and append the row to
+    doc/model_benchmarks.md. Never delete a row: a model that failed on a
+    machine is exactly what stops us trying it again. Add a machine to
+    config.llm_source_model_by_host only once it has rows there.
+
+
+Writing a new test
+------------------
+The project is test first: write the failing test, make it pass, then refactor.
+Three habits keep the suite worth having.
+
+Reach for the seams above rather than for a mock of the standard library. If a
+new component cannot be tested without one, the component probably needs the
+same treatment run_lms got: pull the expensive call out into a module level
+function the test can stand in for.
+
+Assert the negative properties, not only the positive ones. The tests that have
+earned their keep here are the ones asserting that an ephemeral session writes
+nothing, that a substituted model is refused, that a probe does not read another
+probe's verdict, and that build_app.sh does nothing when nothing changed.
+
+Treat a violated assumption as fatal in the test as in the code. A transcript
+line that cannot be parsed stops the rebuild; the test asserts that it stops,
+not that it is skipped.

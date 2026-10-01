@@ -17,7 +17,9 @@
   `rvw_client.lua` talks to the daemon through `bin/rvwctl`; `rvw_presenting.lua` knows
   whether this screen is being shared; `rvw_windows.lua` starts and stops `bin/rvw_view`;
   `rvw_actions.lua` runs one entry for both
-- `doc/` phase reports and model reasoning, `prompts/` the specification
+- `README.md` the overview: architecture, getting started, usage, configuration
+- `doc/` phase reports and model reasoning, `doc/testing` the test strategy and the
+  manual verification procedures, `prompts/` the specification
 - `var/meetings/YYYY/MM/YYYY-MM-DD_HH.MM/` everything one session keeps:
   `transcript.jsonl` and `metadata.json`, `transcript.md` rendered from the JSONL, and
   `screenshots/` with the archived images and their sidecar metadata; move the root with

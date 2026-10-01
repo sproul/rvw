@@ -58,6 +58,7 @@ mkdir -p "$repo_dir/bin" || die "cannot create $repo_dir/bin"
 build_helper audio_capture AVFoundation CoreAudio
 build_helper screen_capture AppKit ScreenCaptureKit ImageIO
 build_viewer
+build_helper ocr_image Vision
 
 "$script_dir/build_app.sh" || die "building bin/rvw.app failed"
 

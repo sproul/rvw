@@ -54,17 +54,53 @@ class Assistant:
 
     # -- lifecycle ---------------------------------------------------------
 
-    def run(self, start_capture_immediately):
+    def run(self, start_capture_immediately, console=False):
         self._log_path = session_log.start_session_log()
         log.info("OK  session log %s", self._log_path)
         self._report_llm_status()
-        self._recognizer.start()
-        self._transcriber.warm_up()
+        self._start_speech_pipeline()
         self._control.start()
         self._print_ready_banner()
         if start_capture_immediately:
             self._start_capture_at_start_up()
-        self._wait_for_quit()
+        if console:
+            self._run_console()
+        else:
+            self._wait_for_quit()
+
+    def _start_speech_pipeline(self):
+        """No configured streams means no audio to recognise, so Whisper stays
+        unloaded -- that is what makes `--source none` start instantly."""
+        if not self._streams:
+            log.info("INFO no capture streams configured; speech recognition is not started")
+            return
+        self._recognizer.start()
+        self._transcriber.warm_up()
+
+    def _run_console(self):
+        """The in-process console: model answers stream to this same terminal.
+
+        The read loop replaced `_wait_for_quit`, which is where the periodic
+        continuous analysis ticked -- a small thread runs it here instead.
+        """
+        from .console import Console
+        ticker = threading.Thread(target=self._console_ticks, name="rvw-console-ticks",
+                                  daemon=True)
+        ticker.start()
+        try:
+            Console(self).run()
+        finally:
+            # Whatever ended the loop -- q, EOF, an exception -- stops the
+            # ticker; shutdown stays in exactly one place (here, or main's
+            # KeyboardInterrupt handler when the interrupt propagates).
+            self._quit_requested.set()
+            ticker.join(timeout=5)
+        self.shut_down()
+
+    def _console_ticks(self):
+        """Fire the periodic continuous analysis until the session ends."""
+        while not self._quit_requested.wait(timeout=1.0):
+            self._run_continuous_analysis_if_due()
 
     def _start_capture_at_start_up(self):
         """A stream that cannot start must not take the whole assistant down with it."""
@@ -405,11 +441,23 @@ class Assistant:
 
     def _start_answer(self, llm, messages, context_text, heading):
         """One model request at a time; the GPU and the terminal are both single resources."""
-        if not self._answering.acquire(blocking=False):
+        if not self._queue_answer(llm, messages, context_text, heading):
             return "an answer is already in progress"
+        return "answering in the assistant terminal"
+
+    def ask_the_model(self, messages, context_text, heading):
+        """Queue one answer on the text model; False while another is running.
+
+        The console needs the boolean, not the reply text: whether a submit
+        really was queued decides if the pending context may be cleared."""
+        return self._queue_answer(self._llm, messages, context_text, heading)
+
+    def _queue_answer(self, llm, messages, context_text, heading):
+        if not self._answering.acquire(blocking=False):
+            return False
         threading.Thread(target=self._answer, args=(llm, messages, context_text, heading),
                          name="rvw-answer", daemon=True).start()
-        return "answering in the assistant terminal"
+        return True
 
     def _requested_stream_names(self, arguments):
         """Streams named on the command line, or every stream this run offers."""
@@ -419,6 +467,8 @@ class Assistant:
         return any(stream.is_running for stream in self._streams.values())
 
     def _start_streams(self, stream_names):
+        if not self._streams:
+            raise RuntimeError("no capture streams are configured (--source none)")
         started = []
         for name in stream_names:
             stream = self._streams.get(name.lower())
@@ -480,10 +530,13 @@ def require_space_free_field_values(fields):
 
 def parse_arguments(argv):
     parser = argparse.ArgumentParser(description="local listening assistant")
-    parser.add_argument("--source", default="both", choices=["mic", "system", "both"],
-                        help="which capture streams to make available")
+    parser.add_argument("--source", default="both", choices=["mic", "system", "both", "none"],
+                        help="which capture streams to make available; 'none' skips "
+                             "speech recognition entirely")
     parser.add_argument("--listen", action="store_true",
                         help="start capturing immediately instead of waiting for the hotkey")
+    parser.add_argument("--console", action="store_true",
+                        help="read console commands from this terminal (rvw> prompt)")
     parser.add_argument("--debug", action="store_true", help="verbose logging")
     return parser.parse_args(argv)
 
@@ -491,10 +544,12 @@ def parse_arguments(argv):
 def main(argv=None):
     arguments = parse_arguments(argv)
     config.debug_mode = arguments.debug
-    stream_names = all_stream_names if arguments.source == "both" else [arguments.source]
+    stream_names = (all_stream_names if arguments.source == "both"
+                    else [] if arguments.source == "none"
+                    else [arguments.source])
     assistant = Assistant(stream_names)
     try:
-        assistant.run(start_capture_immediately=arguments.listen)
+        assistant.run(start_capture_immediately=arguments.listen, console=arguments.console)
     except KeyboardInterrupt:
         assistant.shut_down()
     return 0

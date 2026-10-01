@@ -177,6 +177,15 @@ lms_command = Path.home() / ".lmstudio" / "bin" / "lms"
 screenshot_target = os.environ.get("RVW_SCREENSHOT_TARGET", "frontmost")
 screenshot_timeout_seconds = 20.0
 
+# Console OCR: the Vision helper reads an already archived PNG, so it needs no
+# screen recording permission and no extra third-party software.
+ocr_helper_path = bin_dir / "ocr_image"
+ocr_timeout_seconds = 30.0
+
+# Typing in the console terminal makes that terminal frontmost, so a console
+# screenshot pauses to let a Cmd-Tab back to the window of interest land first.
+console_capture_delay_seconds = 2.0
+
 
 def require_known_stream(stream_name):
     """Reject a capture stream name that the rest of the system cannot label."""
