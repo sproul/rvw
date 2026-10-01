@@ -18,7 +18,7 @@ from pathlib import Path
 
 repo_dir = Path(__file__).resolve().parents[1]
 hammerspoon_dir = repo_dir / "hammerspoon"
-hs_command = "/opt/homebrew/bin/hs"
+hs_command = "hs"
 evaluation_timeout_seconds = 20
 
 
