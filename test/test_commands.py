@@ -3,7 +3,7 @@
 Commands are deliberately transport independent: today they arrive over a unix
 socket, later they may arrive from the companion Mac over the network. Command
 names and their shortcuts are case sensitive on purpose: `c` toggles capture and
-`C` clarifies, so folding case would make them collide.
+`C` ungarbles, so folding case would make them collide.
 """
 
 import unittest
@@ -18,8 +18,8 @@ class CommandDispatcherTest(unittest.TestCase):
         self.dispatcher = CommandDispatcher()
         self.dispatcher.register("EXPLAIN_SPEECH", self.record_call,
                                  description="explain recent speech", shortcut="E")
-        self.dispatcher.register("CLARIFY_SPEECH", self.clarify_call,
-                                 description="clarify recent speech", shortcut="C")
+        self.dispatcher.register("UNGARBLE_SPEECH", self.ungarble_call,
+                                 description="ungarble recent speech", shortcut="C")
         self.dispatcher.register("AUDIO_CAPTURE_TOGGLE", self.capture_call,
                                  description="toggle audio capture", shortcut="c")
         self.dispatcher.register("ANSWER", self.record_call)
@@ -28,9 +28,9 @@ class CommandDispatcherTest(unittest.TestCase):
         self.calls.append(("explain", arguments))
         return "explained %d word(s)" % len(arguments)
 
-    def clarify_call(self, arguments):
-        self.calls.append(("clarify", arguments))
-        return "clarified"
+    def ungarble_call(self, arguments):
+        self.calls.append(("ungarble", arguments))
+        return "ungarbled"
 
     def capture_call(self, arguments):
         self.calls.append(("capture", arguments))
@@ -53,13 +53,13 @@ class CommandDispatcherTest(unittest.TestCase):
                             wrong_case)
 
     def test_a_shortcut_runs_its_canonical_command_with_the_arguments(self):
-        self.assertEqual("OK clarified", self.dispatcher.dispatch("C 45"))
-        self.assertEqual([("clarify", ["45"])], self.calls)
+        self.assertEqual("OK ungarbled", self.dispatcher.dispatch("C 45"))
+        self.assertEqual([("ungarble", ["45"])], self.calls)
 
     def test_shortcuts_differing_only_in_case_are_different_commands(self):
         self.dispatcher.dispatch("c")
         self.dispatcher.dispatch("C")
-        self.assertEqual([("capture", []), ("clarify", [])], self.calls)
+        self.assertEqual([("capture", []), ("ungarble", [])], self.calls)
 
     def test_an_unknown_command_fails_without_raising(self):
         self.assertTrue(self.dispatcher.dispatch("DANCE").startswith("FAIL "))
@@ -67,8 +67,8 @@ class CommandDispatcherTest(unittest.TestCase):
     def test_an_unknown_command_names_the_canonical_commands_not_the_shortcuts(self):
         reply = self.dispatcher.dispatch("DANCE")
         known = reply.split("known: ", 1)[1].rstrip(")").split(", ")
-        self.assertEqual(["ANSWER", "AUDIO_CAPTURE_TOGGLE", "CLARIFY_SPEECH",
-                          "EXPLAIN_SPEECH"], known)
+        self.assertEqual(["ANSWER", "AUDIO_CAPTURE_TOGGLE", "EXPLAIN_SPEECH",
+                          "UNGARBLE_SPEECH"], known)
 
     def test_an_empty_command_fails_without_raising(self):
         self.assertTrue(self.dispatcher.dispatch("").startswith("FAIL "))
@@ -116,16 +116,16 @@ class CommandDispatcherTest(unittest.TestCase):
     # -- listing -----------------------------------------------------------
 
     def test_known_commands_are_the_canonical_names_only(self):
-        self.assertEqual(["ANSWER", "AUDIO_CAPTURE_TOGGLE", "CLARIFY_SPEECH",
-                          "EXPLAIN_SPEECH"],
+        self.assertEqual(["ANSWER", "AUDIO_CAPTURE_TOGGLE", "EXPLAIN_SPEECH",
+                          "UNGARBLE_SPEECH"],
                          self.dispatcher.command_names())
 
     def test_command_help_lists_shortcut_name_and_description_per_command(self):
         self.assertEqual(
             [("", "ANSWER", ""),
              ("c", "AUDIO_CAPTURE_TOGGLE", "toggle audio capture"),
-             ("C", "CLARIFY_SPEECH", "clarify recent speech"),
-             ("E", "EXPLAIN_SPEECH", "explain recent speech")],
+             ("E", "EXPLAIN_SPEECH", "explain recent speech"),
+             ("C", "UNGARBLE_SPEECH", "ungarble recent speech")],
             self.dispatcher.command_help())
 
 

@@ -38,7 +38,7 @@ of the Mac's own audio output as two separate streams, local speech recognition 
 a rolling in-memory transcript, and one hotkey that sends roughly the last 60 seconds
 of text to a local LLM and streams the explanation back to the assistant's terminal.
 
-**Phase 2, making it usable.** `CLARIFY_SPEECH`, a second, shorter transcript command whose
+**Phase 2, making it usable.** `UNGARBLE_SPEECH`, a second, shorter transcript command whose
 prompt asks what words were actually said rather than what they meant - the answer to
 a strong accent or a bad recognition. `SCREENSHOT`, an archival-only capture of the
 frontmost window with its metadata, silent on success so that nothing appears in a
@@ -125,7 +125,7 @@ The choices that shape all of it:
 | `src/rvw/recall.py` | numbering retrieved passages for the model and for me |
 | `src/rvw/llm.py` | streaming OpenAI-compatible client, with both anti-substitution guards |
 | `src/rvw/model_loader.py` | loading the LLM into LM Studio on first need |
-| `src/rvw/prompts.py` | the EXPLAIN, CLARIFY, RECALL and INTERPRET prompts |
+| `src/rvw/prompts.py` | the EXPLAIN, UNGARBLE, RECALL and INTERPRET prompts |
 | `src/rvw/screenshot.py` | archival save plus the sidecar metadata |
 | `src/rvw/commands.py` | transport-independent command dispatcher |
 | `src/rvw/control.py` | unix socket front end for the dispatcher |
@@ -230,7 +230,7 @@ vision model are loaded. It is then listening for commands.
    Recognised utterances appear in the terminal, labelled "me" and "them".
 2. Press alt-cmd-E. The explanation of the last 60 seconds streams into the
    assistant's terminal.
-3. If a passage was hard to make out, press alt-cmd-C instead: the clarification
+3. If a passage was hard to make out, press alt-cmd-C instead: the ungarbling
    reconstructs the words and says which ones it repaired.
 4. To keep this conversation, press alt-cmd-T. `bin/rvwctl STATUS` says where the
    transcript is going.
@@ -246,7 +246,7 @@ vision model are loaded. It is then listening for commands.
 | --- | --- | --- |
 | alt-cmd-R | `AUDIO_CAPTURE_TOGGLE` | start or stop capturing |
 | alt-cmd-E | `EXPLAIN_SPEECH` | explain the last 60 s |
-| alt-cmd-C | `CLARIFY_SPEECH` | reconstruct the words of the last 45 s |
+| alt-cmd-C | `UNGARBLE_SPEECH` | reconstruct the words of the last 45 s |
 | alt-cmd-S | `SCREENSHOT` | archive the frontmost window; silent on success |
 | ctrl-alt-cmd-S | `SCREEN_VISION` | the same save, then a private interpretation |
 | alt-cmd-T | `TRANSCRIPT_TOGGLE` | start or stop keeping this transcript |
@@ -259,7 +259,7 @@ Every command also answers to a short case-sensitive alias, shown after the `#`:
 
 ```bash
 bin/rvwctl EXPLAIN_SPEECH [seconds]        # E
-bin/rvwctl CLARIFY_SPEECH [seconds]        # C
+bin/rvwctl UNGARBLE_SPEECH [seconds]        # C
 bin/rvwctl SCREENSHOT                      # s
 bin/rvwctl SCREEN_VISION [seconds]         # V
 bin/rvwctl SEARCH <words>                  # f
@@ -384,7 +384,7 @@ answer, which is what made it look unusable. `llm.py` therefore prefills a close
 empty `<think></think>` block as the start of the assistant turn, which the model's
 own chat template reads as thinking already done: zero reasoning tokens, a full answer
 in about five seconds. Because the thinking channel is closed, a prompt that invites
-deliberation makes the model deliberate in the visible answer, so CLARIFY's prompt is
+deliberation makes the model deliberate in the visible answer, so UNGARBLE's prompt is
 a decisive, fixed three-part format. Keep that discipline in any new prompt.
 
 **The endpoint cannot be trusted to serve the model it was asked for.** Asked for an

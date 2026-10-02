@@ -18,22 +18,24 @@ from rvw.llm import LocalLlmError
 from rvw.transcript import TranscriptSegment
 
 expected_commands = ["ANSWER", "AUDIO_CAPTURE_START", "AUDIO_CAPTURE_STOP",
-                     "AUDIO_CAPTURE_TOGGLE", "CLARIFY_SPEECH", "EXPLAIN_SPEECH", "MODELS",
+                     "AUDIO_CAPTURE_TOGGLE", "EXPLAIN_SPEECH", "MODELS",
                      "QUIT", "RECALL", "REINDEX", "SCREENSHOT", "SCREEN_VISION", "SEARCH",
                      "SET_LANGUAGE", "SET_MODEL", "STATUS", "STATUS_FIELDS",
                      "TRANSCRIPT_SHOW", "TRANSCRIPT_START", "TRANSCRIPT_STOP",
-                     "TRANSCRIPT_TOGGLE"]
+                     "TRANSCRIPT_TOGGLE", "UNGARBLE_SPEECH"]
 
 expected_shortcuts = {"ANSWER": "A", "AUDIO_CAPTURE_START": "c+",
                       "AUDIO_CAPTURE_STOP": "c-", "AUDIO_CAPTURE_TOGGLE": "c",
-                      "CLARIFY_SPEECH": "C", "EXPLAIN_SPEECH": "E", "MODELS": "ml",
+                      "EXPLAIN_SPEECH": "E", "MODELS": "ml",
                       "QUIT": "q", "RECALL": "r", "REINDEX": "R", "SCREENSHOT": "s",
                       "SCREEN_VISION": "V", "SEARCH": "f", "SET_LANGUAGE": "l",
                       "SET_MODEL": "m", "STATUS": "S", "STATUS_FIELDS": "F",
                       "TRANSCRIPT_SHOW": "T", "TRANSCRIPT_START": "t+",
-                      "TRANSCRIPT_STOP": "t-", "TRANSCRIPT_TOGGLE": "t"}
+                      "TRANSCRIPT_STOP": "t-", "TRANSCRIPT_TOGGLE": "t",
+                      "UNGARBLE_SPEECH": "C"}
 
-former_commands = ["CLARIFY", "CONTINUOUS_TOGGLE", "EXPLAIN", "INTERPRET_SCREEN",
+former_commands = ["CLARIFY", "CLARIFY_SPEECH", "CONTINUOUS_TOGGLE", "EXPLAIN",
+                   "INTERPRET_SCREEN",
                    "START_CAPTURE", "START_RETAINING", "STOP_CAPTURE", "STOP_RETAINING",
                    "TOGGLE_CAPTURE", "TOGGLE_CONTINUOUS", "TOGGLE_RETENTION", "TRANSCRIPT"]
 
@@ -392,21 +394,28 @@ class LlmStatusReportTest(AssistantCommandTestCase):
         self.assertIn("ERROR", [record.levelname for record in captured.records])
 
 
-class ClarifyCommandTest(AssistantCommandTestCase):
+class UngarbleCommandTest(AssistantCommandTestCase):
 
-    def test_clarify_sends_the_recent_transcript_to_the_model(self):
+    def test_ungarble_sends_the_recent_transcript_to_the_model(self):
         self.add_speech("the lease timeout was thirty seconds")
-        self.assertTrue(self.dispatch("CLARIFY_SPEECH").startswith("OK "))
+        self.assertTrue(self.dispatch("UNGARBLE_SPEECH").startswith("OK "))
         requests = self.wait_for_one_answer()
         self.assertEqual(1, len(requests))
         self.assertIn("lease timeout", requests[0][1]["content"])
 
-    def test_clarify_accepts_an_explicit_window_length(self):
+    def test_ungarble_accepts_an_explicit_window_length(self):
         self.add_speech("the lease timeout was thirty seconds")
-        self.assertIn("30", self.dispatch("CLARIFY_SPEECH 30"))
+        self.assertIn("30", self.dispatch("UNGARBLE_SPEECH 30"))
 
-    def test_clarify_without_speech_fails_instead_of_asking_the_model(self):
-        self.assertTrue(self.dispatch("CLARIFY_SPEECH").startswith("FAIL "))
+    def test_ungarble_uses_its_own_shorter_default_window(self):
+        self.add_speech("the lease timeout was thirty seconds")
+        reply = self.dispatch("UNGARBLE_SPEECH")
+        self.assertIn("last 45s", reply)
+        requests = self.wait_for_one_answer()
+        self.assertIn("last 45 seconds", requests[0][1]["content"])
+
+    def test_ungarble_without_speech_fails_instead_of_asking_the_model(self):
+        self.assertTrue(self.dispatch("UNGARBLE_SPEECH").startswith("FAIL "))
         self.assertEqual([], self.llm.requests)
 
 

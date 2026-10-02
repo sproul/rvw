@@ -1,7 +1,7 @@
 """Prompts sent to the local LLM and to the local vision model.
 
 Three behaviours share one transcript framing: EXPLAIN teaches the concepts,
-CLARIFY reconstructs the words, INTERPRET describes what is on the screen.
+UNGARBLE reconstructs the words, INTERPRET describes what is on the screen.
 Later phases add language and comprehension profiles here rather than in the
 callers.
 """
@@ -27,7 +27,7 @@ explain_system_prompt = (
 )
 
 
-clarify_system_prompt = (
+ungarble_system_prompt = (
     "You help a listener who could not make out what was just said.\n"
     "You are given a machine transcription of the last part of a live conversation.\n"
     "Your task is to reconstruct the words themselves, not to teach the concepts.\n"
@@ -79,9 +79,9 @@ def build_explain_messages(transcript_text, window_seconds):
                                       "Explain this passage now.")
 
 
-def build_clarify_messages(transcript_text, window_seconds):
+def build_ungarble_messages(transcript_text, window_seconds):
     """Chat messages asking what was actually said in the recent transcript window."""
-    return _build_transcript_messages(clarify_system_prompt, transcript_text, window_seconds,
+    return _build_transcript_messages(ungarble_system_prompt, transcript_text, window_seconds,
                                       "Reconstruct this passage now.")
 
 

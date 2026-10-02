@@ -2,8 +2,8 @@
 
 import unittest
 
-from rvw.prompts import (build_clarify_messages, build_explain_messages,
-                         build_interpret_messages)
+from rvw.prompts import (build_explain_messages, build_interpret_messages,
+                         build_ungarble_messages)
 
 TRANSCRIPT = "[00:03] them: we should use a bounded work queue\n[00:11] me: how bounded"
 IMAGE_DATA_URI = "data:image/png;base64,aW1hZ2U="
@@ -33,11 +33,11 @@ class BuildExplainMessagesTest(unittest.TestCase):
             build_explain_messages("   ", window_seconds=60)
 
 
-class BuildClarifyMessagesTest(unittest.TestCase):
-    """Clarify reconstructs the words themselves; it does not teach concepts."""
+class BuildUngarbleMessagesTest(unittest.TestCase):
+    """Ungarble reconstructs the words themselves; it does not teach concepts."""
 
     def setUp(self):
-        self.messages = build_clarify_messages(TRANSCRIPT, window_seconds=45)
+        self.messages = build_ungarble_messages(TRANSCRIPT, window_seconds=45)
 
     def test_the_conversation_is_a_system_plus_user_pair(self):
         self.assertEqual(["system", "user"], [message["role"] for message in self.messages])
@@ -53,13 +53,13 @@ class BuildClarifyMessagesTest(unittest.TestCase):
         for expected in ["accent", "misrecogni", "uncertain", "verbatim"]:
             self.assertIn(expected, instructions)
 
-    def test_clarify_does_not_reuse_the_explain_instructions(self):
+    def test_ungarble_does_not_reuse_the_explain_instructions(self):
         explain_instructions = build_explain_messages(TRANSCRIPT, window_seconds=45)[0]["content"]
         self.assertNotEqual(explain_instructions, self.messages[0]["content"])
 
     def test_an_empty_transcript_is_refused(self):
         with self.assertRaises(ValueError):
-            build_clarify_messages("", window_seconds=45)
+            build_ungarble_messages("", window_seconds=45)
 
 
 class BuildInterpretMessagesTest(unittest.TestCase):

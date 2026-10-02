@@ -65,7 +65,7 @@ on the M4:
     meeting-assistant    qwen3.6-35b-a3b    IDLE    20.43 GB    34560    1h
 
     Identifiers the assistant asks for
-    OK   meeting-assistant is served, so EXPLAIN and CLARIFY will reach it
+    OK   meeting-assistant is served, so EXPLAIN and UNGARBLE will reach it
     FAIL meeting-vision is not served, so INTERPRET_SCREEN would be answered by
          whatever model is loaded
 

@@ -65,9 +65,9 @@ loads it as `meeting-assistant`, and `RVW_LLM_MODEL` overrides the name.
 
 In priority order. Do not start the next item until the previous one runs.
 
-### 1. CLARIFY (alt-cmd-C)
+### 1. UNGARBLE (alt-cmd-C)
 
-A second explanation command over a shorter window, roughly 30 to 60 seconds,
+A second transcript command over a shorter window, roughly 30 to 60 seconds,
 whose prompt is aimed at reconstructing what was said when the accent or the
 recognition made it hard to parse, rather than at explaining concepts. This is
 a new prompt builder in `src/rvw/prompts.py` and a new dispatcher command; the

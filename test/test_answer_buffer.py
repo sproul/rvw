@@ -29,7 +29,7 @@ class AnswerBufferTest(unittest.TestCase):
         self.assertIn("the lease timeout", rendered)
 
     def test_a_finished_answer_is_no_longer_in_progress(self):
-        self.buffer.begin("clarification")
+        self.buffer.begin("ungarbling")
         self.buffer.append("they said backoff")
         self.buffer.finish()
         rendered = self.buffer.render()
@@ -40,7 +40,7 @@ class AnswerBufferTest(unittest.TestCase):
         self.buffer.begin("explanation")
         self.buffer.append("the first answer")
         self.buffer.finish()
-        self.buffer.begin("clarification")
+        self.buffer.begin("ungarbling")
         self.buffer.append("the second answer")
         rendered = self.buffer.render()
         self.assertNotIn("the first answer", rendered)

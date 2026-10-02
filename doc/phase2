@@ -1,4 +1,4 @@
-PHASE 2 - A USABLE ASSISTANT: CLARIFY AND SCREENSHOTS
+PHASE 2 - A USABLE ASSISTANT: UNGARBLE AND SCREENSHOTS
 =====================================================
 Written 2026-08-16 on the M3 (96 GB), before the local models were available on
 this machine, and verified on the M4 Air on 2026-08-21 against the real helpers
@@ -9,7 +9,7 @@ verify".
 
 What is new
 -----------
-CLARIFY (alt-cmd-C)
+UNGARBLE (alt-cmd-C)
   A second transcript command over a shorter window, 45 s by default. Its prompt
   asks for the words rather than the concepts: most likely verbatim wording
   first, marked where it was repaired, then one or two sentences of meaning, and
@@ -67,7 +67,7 @@ automatically: if the frontmost window cannot be resolved the helper fails and
 says to ask for the display explicitly, rather than quietly archiving the whole
 desktop.
 
-EXPLAIN, CLARIFY and INTERPRET_SCREEN share one answering path in the assistant:
+EXPLAIN, UNGARBLE and INTERPRET_SCREEN share one answering path in the assistant:
 one lock, one streaming thread, one session log record, one terminal rendering.
 The difference between them is a prompt builder and which model client is used,
 so a fourth behaviour is a prompt plus a dispatcher entry. The three prompts
@@ -132,8 +132,8 @@ window title, window id, size, bytes and both timestamps included.
 Recognition. Two spoken sentences became two transcript segments on the "them"
 stream within about ten seconds of being spoken.
 
-CLARIFY did the job it exists for. Whisper heard "The least timeout on the
-coordinator" and "exponential back off"; the clarification returned "lease
+UNGARBLE did the job it exists for. Whisper heard "The least timeout on the
+coordinator" and "exponential back off"; the reconstruction returned "lease
 timeout" and "backoff", marked both as repairs, and added two sentences of
 meaning. This is the first evidence that the shorter window and the different
 prompt earn their place beside EXPLAIN.
@@ -210,7 +210,7 @@ Still to verify
 
 Rough edges
 -----------
-- Only one answer runs at a time, so pressing CLARIFY while an EXPLAIN is
+- Only one answer runs at a time, so pressing UNGARBLE while an EXPLAIN is
   streaming is refused rather than queued.
 - The interpretation is printed in the assistant terminal. That is private only
   as long as that terminal is not the window being shared.

@@ -70,7 +70,7 @@ report_the_identifiers_the_assistant_asks_for() {
         log_fail "nothing is served at port $(read_llm_server_port); start it with 'lms server start'"
         return 1
     fi
-    report_one_identifier "$(read_assistant_setting llm_model)" "EXPLAIN_SPEECH and CLARIFY_SPEECH" "$served" \
+    report_one_identifier "$(read_assistant_setting llm_model)" "EXPLAIN_SPEECH and UNGARBLE_SPEECH" "$served" \
         "it is loaded when it is first needed, which makes that one question slow"
     report_one_identifier "$(read_assistant_setting vision_llm_model)" "SCREEN_VISION" "$served" \
         "SCREEN_VISION declines instead of answering, and alt-cmd-S still archives screenshots"

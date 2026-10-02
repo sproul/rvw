@@ -179,6 +179,7 @@ class MenuContentsTest(lua_testing.PureLuaTestCase):
     def test_every_action_and_the_model_are_named(self):
         titles = self.titles(busy_status)
         self.assertIn("Explain the last minute", titles)
+        self.assertIn("Ungarble what was just said", titles)
         self.assertIn("Screenshot and interpret", titles)
         self.assertIn("Model: meeting-assistant", titles)
         self.assertIn("Quit the assistant", titles)

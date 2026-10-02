@@ -72,7 +72,7 @@ JSONL, and an ephemeral session wrote nothing at all. See `doc/phase3`.
 
 Phase 2 is verified on the M4 Air against the real helpers and the real model:
 all four permissions granted, real screenshots archived with their metadata, real
-speech transcribed through the system audio tap, and CLARIFY and EXPLAIN both
+speech transcribed through the system audio tap, and UNGARBLE and EXPLAIN both
 answering from it. Two bugs were found by that verification and fixed; they are
 the two entries at the end of "What was learned" below. See `doc/phase1`,
 `doc/phase2` and `doc/phase3` for the design decisions and measurements, and
@@ -119,7 +119,7 @@ What exists in the repository:
   `util/list_models.sh` shows both model stores; `util/init.sh` runs the three
   installers.
 
-Commands understood today: `EXPLAIN [seconds]`, `CLARIFY [seconds]`,
+Commands understood today: `EXPLAIN [seconds]`, `UNGARBLE [seconds]`,
 `SCREENSHOT`, `INTERPRET_SCREEN [seconds]`, `SEARCH <words>`, `RECALL <question>`,
 `REINDEX`, `START_CAPTURE [streams]`,
 `STOP_CAPTURE`, `TOGGLE_CAPTURE`, `TOGGLE_CONTINUOUS`, `START_RETAINING`,
@@ -127,7 +127,7 @@ Commands understood today: `EXPLAIN [seconds]`, `CLARIFY [seconds]`,
 `SET_MODEL <identifier>`, `SET_LANGUAGE <code>`, `STATUS`, `STATUS_FIELDS`, `QUIT`.
 Hotkeys today, all declared in one table in `hammerspoon/rvw_config.lua`:
 alt-cmd-R capture, ctrl-alt-cmd-R capture and analyse,
-alt-cmd-E explain the last 60 seconds, alt-cmd-C clarify the last 45 seconds,
+alt-cmd-E explain the last 60 seconds, alt-cmd-C ungarble the last 45 seconds,
 alt-cmd-S screenshot, ctrl-alt-cmd-S screenshot and interpret, alt-cmd-T keep or
 stop keeping the transcript, alt-cmd-P presenting (draw nothing on this screen),
 alt-cmd-W the transcript window, ctrl-alt-cmd-W the answer window.
@@ -173,7 +173,7 @@ What was learned, and what it changes:
    Measured there on the M3 on 2026-08-16: microphone and system audio granted,
    screen recording declined, Hammerspoon without Accessibility.
 8. Every model-facing action shares one answering path in `assistant.py`: one
-   lock, one streaming thread, one session log record. EXPLAIN, CLARIFY and
+   lock, one streaming thread, one session log record. EXPLAIN, UNGARBLE and
    INTERPRET_SCREEN differ only in the prompt builder and the model client, so
    a fourth behaviour is a prompt plus a dispatcher entry, not new machinery.
 9. Screenshots are canonical data and are saved before, and independently of,
@@ -225,7 +225,7 @@ What was learned, and what it changes:
    whether it is in progress, complete or failed. Assume the next reader will find
    one more.
 
-CLARIFY is the clearest Phase 2 win so far: asked about "The least timeout on the
+UNGARBLE is the clearest Phase 2 win so far: asked about "The least timeout on the
 coordinator" and "exponential back off", both misrecognitions, it returned "lease
 timeout" and "backoff" and said it had repaired them. EXPLAIN repairs words too,
 but a wrong repair reads exactly like a right one — it turned "write path" into
@@ -381,7 +381,7 @@ Agreed hotkey scheme:
   alt-cmd-R        capture and transcribe (TOGGLE_CAPTURE)          exists
   ctrl-alt-cmd-R   capture, transcribe and analyse continuously     exists
   alt-cmd-E        explain the last 60 seconds                      exists
-  alt-cmd-C        clarify the last 30 to 60 seconds                new
+  alt-cmd-C        ungarble the last 30 to 60 seconds                new
   alt-cmd-S        screenshot, save only                            new
   ctrl-alt-cmd-S   screenshot, save and interpret                   new, lower priority
 
@@ -389,9 +389,9 @@ Agreed hotkey scheme:
 
 Implement configurable global actions:
 
-### Clarify
+### Ungarble
 
-Clarify/reconstruct the last approximately 30–60 seconds.
+Ungarble/reconstruct the last approximately 30–60 seconds.
 
 Useful particularly when speech recognition or an accent made the words difficult to parse.
 
@@ -619,7 +619,7 @@ The user-facing commands and archive format must remain identical whether infere
 
 The primary-Mac hotkey agent should require no screen, camera, or microphone permissions merely to send commands such as:
 
-* CLARIFY
+* UNGARBLE
 * EXPLAIN
 * CAPTURE
 * INTERPRET
@@ -709,7 +709,7 @@ Examples:
 
 * The MVA may support only one local ASR backend, but ASR should not be inseparably embedded in audio capture.
 * The MVA may support only one local LLM, but callers should not depend on that model's implementation details.
-* The MVA may run everything in one process, but hotkey actions should conceptually dispatch commands such as `CLARIFY` or `EXPLAIN`, so those commands can later execute on another Mac.
+* The MVA may run everything in one process, but hotkey actions should conceptually dispatch commands such as `UNGARBLE` or `EXPLAIN`, so those commands can later execute on another Mac.
 * The MVA may keep transcript history only in RAM, but transcript records should already have timestamps and a stable structure suitable for later persistence.
 * Screenshot support need not exist in the MVA, but nothing should assume that transcript text is the only form of meeting context.
 * Do not introduce networking for the MVA merely because companion mode will eventually exist. Instead, make the boundary clear enough that a network transport can later replace an in-process call.

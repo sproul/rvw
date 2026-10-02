@@ -3,7 +3,7 @@
 Hotkeys, the control socket and (in a later phase) the companion Mac all
 produce the same textual commands, so nothing above this layer needs to know
 where a command came from. Names are case sensitive on purpose: `c` toggles
-capture while `C` clarifies, so folding case would make them collide.
+capture while `C` ungarbles, so folding case would make them collide.
 """
 
 import logging

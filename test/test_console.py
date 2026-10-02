@@ -173,7 +173,7 @@ class LineLanguageTest(ConsoleTestCase):
         reply = self.console.handle_line("?")
         for alias in ["s  ", "S  ", "c TEXT", "pl", "send", "?", "q  quit"]:
             self.assertIn(alias, reply)
-        self.assertIn(":C  CLARIFY_SPEECH", reply)
+        self.assertIn(":C  UNGARBLE_SPEECH", reply)
         self.assertIn(":NAME", reply)
         names = self.assistant._dispatcher.command_names()
         lines = reply.splitlines()

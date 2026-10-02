@@ -177,7 +177,7 @@ assistant - test_assistant.py, 32 tests
   so and never writes the speech it hears; retention writes what follows it and
   not what preceded it; SCREENSHOT reports where the image went and calls no
   model at all; INTERPRET_SCREEN still reports the archived image when no vision
-  model is loaded, and asks no other model to stand in for it; CLARIFY without
+  model is loaded, and asks no other model to stand in for it; UNGARBLE without
   speech fails instead of asking the model nonsense; SEARCH and RECALL refuse an
   empty query, say so plainly when nothing matches, and RECALL never calls the
   model when there is nothing to ground it on. Capture, recognition and the
@@ -281,10 +281,10 @@ where the previous runs are recorded.
     streams, "me" and "them", within about ten seconds of speaking. The
     microphone as a transcript stream is the one still unverified on the M4.
 
-  EXPLAIN and CLARIFY
+  EXPLAIN and UNGARBLE
     Play a passage with some jargon in it, press alt-cmd-E, then alt-cmd-C.
     Judge the answer, and time it: the model sizing decision lives on those
-    seconds. CLARIFY should be terse and in its fixed three-part shape; if it
+    seconds. UNGARBLE should be terse and in its fixed three-part shape; if it
     rambles, the prompt has stopped holding the model, which is the failure mode
     of a model whose thinking channel is closed.
 

@@ -169,10 +169,10 @@ class Assistant:
         """What this run will do, not what the keys are: the keys and the menu are
         declared in hammerspoon/rvw_config.lua and the menu bar lists them, so
         repeating them here only creates a second version to keep right."""
-        log.info("OK  ready. EXPLAIN_SPEECH covers the last %ds, CLARIFY_SPEECH the last %ds; "
+        log.info("OK  ready. EXPLAIN_SPEECH covers the last %ds, UNGARBLE_SPEECH the last %ds; "
                  "the menu bar "
                  "lists every hotkey and both windows",
-                 int(config.explain_window_seconds), int(config.clarify_window_seconds))
+                 int(config.explain_window_seconds), int(config.ungarble_window_seconds))
         log.info("OK  screenshots are archived under %s", self._archive.directory)
         log.info("OK  transcript retention: %s", self._archive.describe_state())
 
@@ -189,8 +189,6 @@ class Assistant:
                  "stop audio capture", "c-"),
                 ("AUDIO_CAPTURE_TOGGLE", self._command_toggle_capture,
                  "toggle audio capture", "c"),
-                ("CLARIFY_SPEECH", self._command_clarify,
-                 "clarify recent speech with the text model (optional seconds)", "C"),
                 ("EXPLAIN_SPEECH", self._command_explain,
                  "explain recent speech with the text model (optional seconds)", "E"),
                 ("MODELS", self._command_models,
@@ -223,7 +221,9 @@ class Assistant:
                 ("TRANSCRIPT_STOP", self._command_stop_retaining,
                  "stop keeping the transcript", "t-"),
                 ("TRANSCRIPT_TOGGLE", self._command_toggle_retention,
-                 "toggle transcript retention", "t")]:
+                 "toggle transcript retention", "t"),
+                ("UNGARBLE_SPEECH", self._command_ungarble,
+                 "ungarble recent speech with the text model (optional seconds)", "C")]:
             dispatcher.register(name, handler, description, shortcut=shortcut)
         return dispatcher
 
@@ -262,9 +262,9 @@ class Assistant:
         return self._start_transcript_answer(prompts.build_explain_messages, arguments,
                                              config.explain_window_seconds, "explanation")
 
-    def _command_clarify(self, arguments):
-        return self._start_transcript_answer(prompts.build_clarify_messages, arguments,
-                                             config.clarify_window_seconds, "clarification")
+    def _command_ungarble(self, arguments):
+        return self._start_transcript_answer(prompts.build_ungarble_messages, arguments,
+                                             config.ungarble_window_seconds, "ungarbling")
 
     def _command_screenshot(self, arguments):
         """Archival only: no OCR, no model, no network, nothing on screen."""

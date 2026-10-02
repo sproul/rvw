@@ -74,7 +74,7 @@ Load the model in LM Studio (or `lms load ...`), then:
     util/bench_model.sh <served-model-id>          # production config
     util/bench_model.sh <served-model-id> --raw    # thinking left on, to show the failure
 
-It sends three fixed prompts -- the real EXPLAIN, CLARIFY and RECALL framings the
+It sends three fixed prompts -- the real EXPLAIN, UNGARBLE and RECALL framings the
 assistant sends -- and reports, per prompt:
 
 - **fit (swap delta)**: MB of swap that appeared during the run, and the resident
@@ -107,42 +107,42 @@ empty answer is not usable.
 date       | machine | model                     | quant | case    | fit (swapΔ) | ttft_s | wall_s | decode_tok/s | reason_tk | finish | verdict
 -----------|---------|---------------------------|-------|---------|-------------|--------|--------|--------------|-----------|--------|--------
 2026-08-22 | m3      | Qwen3.6-35B-A3B (qwen3.6-35b-a3b) | 4-bit MLX | EXPLAIN | 0 MB | 6.1 | 13.3 | 88.5  | 0 | stop | usable
-2026-08-22 | m3      | Qwen3.6-35B-A3B (qwen3.6-35b-a3b) | 4-bit MLX | CLARIFY | 0 MB | 0.4 | 2.7  | 89.7  | 0 | stop | usable
+2026-08-22 | m3      | Qwen3.6-35B-A3B (qwen3.6-35b-a3b) | 4-bit MLX | UNGARBLE | 0 MB | 0.4 | 2.7  | 89.7  | 0 | stop | usable
 2026-08-22 | m3      | Qwen3.6-35B-A3B (qwen3.6-35b-a3b) | 4-bit MLX | RECALL  | 0 MB | 0.4 | 0.5  | 110.0 | 0 | stop | usable
 2026-08-22 | m4      | Qwen3.6-35B-A3B (qwen3.6-35b-a3b) | 4-bit MLX | EXPLAIN | -4709 MB (see note) / 20.4 GB res | 23.9 | 31.9 | 41.9 | 0 | stop | not usable
-2026-08-22 | m4      | Qwen3.6-35B-A3B (qwen3.6-35b-a3b) | 4-bit MLX | CLARIFY | -4709 MB (see note) / 20.4 GB res | 1.7 | 3.3 | 43.4 | 0 | stop | not usable
+2026-08-22 | m4      | Qwen3.6-35B-A3B (qwen3.6-35b-a3b) | 4-bit MLX | UNGARBLE | -4709 MB (see note) / 20.4 GB res | 1.7 | 3.3 | 43.4 | 0 | stop | not usable
 2026-08-22 | m4      | Qwen3.6-35B-A3B (qwen3.6-35b-a3b) | 4-bit MLX | RECALL  | -4709 MB (see note) / 20.4 GB res | 1.1 | 1.4 | 53.1 | 0 | stop | not usable
 2026-08-22 | m4      | Qwen3.6-35B-A3B (qwen3.6-35b-a3b-mlx, andrevp) | 3-bit MLX | EXPLAIN | +122 MB / 14.2 GB res | 4.0 | 13.0 | 42.4 | 0 | stop | usable
-2026-08-22 | m4      | Qwen3.6-35B-A3B (qwen3.6-35b-a3b-mlx, andrevp) | 3-bit MLX | CLARIFY | +122 MB / 14.2 GB res | 1.5 | 3.3 | 45.5 | 0 | stop | usable
+2026-08-22 | m4      | Qwen3.6-35B-A3B (qwen3.6-35b-a3b-mlx, andrevp) | 3-bit MLX | UNGARBLE | +122 MB / 14.2 GB res | 1.5 | 3.3 | 45.5 | 0 | stop | usable
 2026-08-22 | m4      | Qwen3.6-35B-A3B (qwen3.6-35b-a3b-mlx, andrevp) | 3-bit MLX | RECALL  | +122 MB / 14.2 GB res | 1.2 | 1.5 | 56.9 | 0 | stop | usable
 2026-08-22 | m4      | Ling-mini-2.0 16B-A1.4B (ling-mini-2.0) | 4-bit MLX | EXPLAIN | 0 MB / 8.5 GB res | 1.0 | 5.2 | 110.4 | 0 | stop | usable, answers untidy
-2026-08-22 | m4      | Ling-mini-2.0 16B-A1.4B (ling-mini-2.0) | 4-bit MLX | CLARIFY | 0 MB / 8.5 GB res | 0.6 | 1.9 | 114.8 | 0 | stop | usable, answers untidy
+2026-08-22 | m4      | Ling-mini-2.0 16B-A1.4B (ling-mini-2.0) | 4-bit MLX | UNGARBLE | 0 MB / 8.5 GB res | 0.6 | 1.9 | 114.8 | 0 | stop | usable, answers untidy
 2026-08-22 | m4      | Ling-mini-2.0 16B-A1.4B (ling-mini-2.0) | 4-bit MLX | RECALL  | 0 MB / 8.5 GB res | 0.6 | 1.0 | 136.0 | 0 | stop | usable, answers untidy
 2026-08-22 | m4      | Qwen3.5-9B (qwen3.5-9b-mlx) | 4-bit MLX | EXPLAIN | 0 MB / 5.6 GB res | 1.8 | 25.1 | 19.4 | 0 | stop | fits, too slow
-2026-08-22 | m4      | Qwen3.5-9B (qwen3.5-9b-mlx) | 4-bit MLX | CLARIFY | 0 MB / 5.6 GB res | 2.5 | 6.8  | 20.9 | 0 | stop | fits, too slow
+2026-08-22 | m4      | Qwen3.5-9B (qwen3.5-9b-mlx) | 4-bit MLX | UNGARBLE | 0 MB / 5.6 GB res | 2.5 | 6.8  | 20.9 | 0 | stop | fits, too slow
 2026-08-22 | m4      | Qwen3.5-9B (qwen3.5-9b-mlx) | 4-bit MLX | RECALL  | 0 MB / 5.6 GB res | 1.8 | 2.4  | 26.2 | 0 | stop | fits, too slow
 2026-08-22 | m4      | Qwen3.5-4B (qwen3.5-4b-mlx) | 4-bit MLX | EXPLAIN | 0 MB / 2.9 GB res | 1.0 | 12.6 | 34.9 | 0 | stop | fast, hallucinates
-2026-08-22 | m4      | Qwen3.5-4B (qwen3.5-4b-mlx) | 4-bit MLX | CLARIFY | 0 MB / 2.9 GB res | 1.3 | 4.3  | 36.7 | 0 | stop | fast, leaks the prompt
+2026-08-22 | m4      | Qwen3.5-4B (qwen3.5-4b-mlx) | 4-bit MLX | UNGARBLE | 0 MB / 2.9 GB res | 1.3 | 4.3  | 36.7 | 0 | stop | fast, leaks the prompt
 2026-08-22 | m4      | Qwen3.5-4B (qwen3.5-4b-mlx) | 4-bit MLX | RECALL  | 0 MB / 2.9 GB res | 0.9 | 1.3  | 42.3 | 0 | stop | fast, hallucinates
 2026-08-22 | m4      | Ling-mini-2.0 16B-A1.4B (ling-mini-2.0) --raw | 4-bit MLX | EXPLAIN | 0 MB / 8.5 GB res | 0.2 | 3.1 | 108.4 | 0 | stop | suppression is a no-op here
-2026-08-22 | m4      | Ling-mini-2.0 16B-A1.4B (ling-mini-2.0) --raw | 4-bit MLX | CLARIFY | 0 MB / 8.5 GB res | 0.2 | 0.9 | 109.3 | 0 | stop | suppression is a no-op here
+2026-08-22 | m4      | Ling-mini-2.0 16B-A1.4B (ling-mini-2.0) --raw | 4-bit MLX | UNGARBLE | 0 MB / 8.5 GB res | 0.2 | 0.9 | 109.3 | 0 | stop | suppression is a no-op here
 2026-08-22 | m4      | Ling-mini-2.0 16B-A1.4B (ling-mini-2.0) --raw | 4-bit MLX | RECALL  | 0 MB / 8.5 GB res | 0.2 | 0.4 | 134.7 | 0 | stop | suppression is a no-op here
 
 Notes on the m3 / Qwen3.6-35B-A3B run (2026-08-22):
 
 - Fit comfortably on 96 GB with no swap; ~20 GB footprint at 4-bit. Decode held
   ~88-110 tok/s, the A3B's 3B-active profile. EXPLAIN's 6.1s ttft is the first
-  case of the process and includes one-time warmup; CLARIFY and RECALL, warm, show
+  case of the process and includes one-time warmup; UNGARBLE and RECALL, warm, show
   the true ~0.4s prefill for these prompt sizes.
 - Reasoning suppression (the empty-<think> prefill, config.reasoning_prefill) was
   on, as in production: 0 reasoning tokens in every case. With `--raw` on the same
   machine the EXPLAIN prompt instead spent all 1023/1024 tokens on reasoning and
   returned an empty answer (finish=length) -- the failure this suppression fixes.
-- Answer quality was good for EXPLAIN and RECALL. CLARIFY originally rambled: with
+- Answer quality was good for EXPLAIN and RECALL. UNGARBLE originally rambled: with
   the thinking channel closed, its "weigh the plausible readings" instruction leaked
   the deliberation into the visible answer (an early run took ~29s). Its prompt was
   then tightened to a decisive, fixed three-part format, and verified terse over five
-  runs on m3 (0.7-1.6s, 210-340 chars each). If a future model rambles on CLARIFY or
+  runs on m3 (0.7-1.6s, 210-340 chars each). If a future model rambles on UNGARBLE or
   any prompt, it is fighting the closed thinking channel; make the prompt more
   decisive rather than blaming the model.
 - Now benchmarked on m4 as well, and it does fail the memory filter there; see the
@@ -181,7 +181,7 @@ context, under the machine's ordinary desktop load.
 - **Ling-mini-2.0 4-bit -- fastest by a wide margin, untidy answers.** 8.5 GB resident,
   no swap at all, 0.2s warm ttft and 110-136 tok/s, about three times the 3-bit MoE.
   The answers are correct but do not hold the requested shape: EXPLAIN emitted its
-  summary twice, and CLARIFY echoed the whole transcript before its three-part answer.
+  summary twice, and UNGARBLE echoed the whole transcript before its three-part answer.
   It is not a Qwen thinking model, so, as the task asked, it was also run with `--raw`:
   suppression makes no difference to reasoning tokens (0 either way -- it does not
   think), but it does make the formatting worse. With `--raw` the duplicated EXPLAIN
@@ -197,7 +197,7 @@ context, under the machine's ordinary desktop load.
 - **Qwen3.5-4B 4-bit -- fast, and wrong.** 2.9 GB resident, 35-42 tok/s, and it
   invented its facts: it decided the transcript was about Cassandra, asserted a
   15-second default renewal interval that appears nowhere, and mis-repaired "least
-  timeout" to "minimum timeout". CLARIFY also echoed the instruction text of its own
+  timeout" to "minimum timeout". UNGARBLE also echoed the instruction text of its own
   prompt back into the answer. This is the case the file's rule is written against in
   reverse -- it fits and it is fast, and it is still unusable.
 
@@ -220,9 +220,9 @@ whether a model is fast enough for a whole meeting.
 It is the only candidate that passes all three filters in order. It *fits*: 14.2 GB
 resident leaves about 17 GB for the OS and applications, and 122 MB of swap growth is
 noise rather than paging. It is *fast enough*: 1.2s to the first token warm and 42
-tok/s, holding 34 tok/s throttled, which puts a full EXPLAIN at 8-15s and CLARIFY and
+tok/s, holding 34 tok/s throttled, which puts a full EXPLAIN at 8-15s and UNGARBLE and
 RECALL at 1.5-4s. And its *answers are good*: correct repair and terminology on
-EXPLAIN, the decisive three-part CLARIFY the tightened prompt asks for, and a correctly
+EXPLAIN, the decisive three-part UNGARBLE the tightened prompt asks for, and a correctly
 cited one-line RECALL, with 0 reasoning tokens in every case because it is the same
 model family the reasoning suppression was built for.
 

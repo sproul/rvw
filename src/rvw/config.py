@@ -41,7 +41,7 @@ max_segment_seconds = 20.0
 transcript_retention_seconds = 1800.0
 transcript_display_seconds = 300.0       # what the transcript window shows by default
 explain_window_seconds = 60.0
-clarify_window_seconds = 45.0            # short: clarify is about the words just spoken
+ungarble_window_seconds = 45.0           # short: ungarble is about the words just spoken
 interpret_window_seconds = 120.0         # context sent with a screenshot
 continuous_analysis_period_seconds = 120.0
 

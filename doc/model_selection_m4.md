@@ -50,7 +50,7 @@ for it.
        util/bench_model.sh <served-model-id>
 
    The tool reports fit (swap delta), time to first token, decode tokens/s,
-   reasoning tokens and finish reason for the real EXPLAIN, CLARIFY and RECALL
+   reasoning tokens and finish reason for the real EXPLAIN, UNGARBLE and RECALL
    prompts, and prints the full answers. Read the answers, not just the numbers:
    fast and wrong is not usable. For a thinking model, the default suppresses
    reasoning the way the assistant does (an empty-<think> prefill); if a candidate
@@ -69,7 +69,7 @@ for it.
    approximate ones. Commit the updated file.
 
 5. **Recommend one model** for the assistant on this machine, with the reasoning:
-   what fit, what was fast enough, and whether its EXPLAIN / CLARIFY / RECALL
+   what fit, what was fast enough, and whether its EXPLAIN / UNGARBLE / RECALL
    answers were good. Note that adopting it needs no code change -- `RVW_LLM_MODEL`
    and `RVW_LLM_URL` switch models, and `util/init_local_models.sh <hf-model>`
    loads a chosen model under the `meeting-assistant` identifier the app uses.
@@ -83,8 +83,8 @@ list what was tried, so the next step is choosing a different class of model rat
 than repeating these.
 
 One caution carried over from m3: because the thinking channel is closed, a model
-will deliberate in the visible answer if the prompt invites it. CLARIFY did this on
+will deliberate in the visible answer if the prompt invites it. UNGARBLE did this on
 m3 until its prompt was tightened to a decisive, fixed format, which fixed it there.
-A different model may still ramble on CLARIFY, EXPLAIN or RECALL; if it does, record
+A different model may still ramble on UNGARBLE, EXPLAIN or RECALL; if it does, record
 it against the model and machine -- it is the model fighting the closed thinking
 channel, not your model choice failing, and the answer is a more decisive prompt.

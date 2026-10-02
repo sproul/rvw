@@ -16,8 +16,8 @@ config.hotkeys = {
    description = "capture and transcribe"},
   {mods = {"alt", "cmd"}, key = "e", command = "EXPLAIN_SPEECH",
    description = "explain the last minute"},
-  {mods = {"alt", "cmd"}, key = "c", command = "CLARIFY_SPEECH",
-   description = "clarify what was just said"},
+  {mods = {"alt", "cmd"}, key = "c", command = "UNGARBLE_SPEECH",
+   description = "ungarble what was just said"},
   {mods = {"alt", "cmd"}, key = "s", command = "SCREENSHOT", silent = true,
    description = "screenshot, save only"},
   {mods = {"ctrl", "alt", "cmd"}, key = "s", command = "SCREEN_VISION", silent = true,
@@ -40,7 +40,7 @@ config.hotkeys = {
 -- hotkey is here too, because the menu is also the reminder of what exists.
 config.menu_actions = {
   {title = "Explain the last minute", command = "EXPLAIN_SPEECH"},
-  {title = "Clarify what was just said", command = "CLARIFY_SPEECH"},
+  {title = "Ungarble what was just said", command = "UNGARBLE_SPEECH"},
   {title = "Screenshot", command = "SCREENSHOT", silent = true},
   {title = "Screenshot and interpret", command = "SCREEN_VISION", silent = true},
   {title = "Rebuild the search index", command = "REINDEX"},

@@ -42,7 +42,7 @@
 - Run the tests: `util/run_tests.sh` (unittest, no pytest in the venv)
 - Run the assistant: `bin/rvw [--source mic|system|both] [--listen] [--debug]`, which starts it
   inside `bin/rvw.app`; `bin/rvw -here ...` runs it in this terminal instead
-- Send a command: `bin/rvwctl EXPLAIN_SPEECH|CLARIFY_SPEECH|SCREENSHOT|SCREEN_VISION|SEARCH|RECALL|REINDEX|AUDIO_CAPTURE_TOGGLE|AUDIO_CAPTURE_START|AUDIO_CAPTURE_STOP|TRANSCRIPT_START|TRANSCRIPT_STOP|TRANSCRIPT_TOGGLE|TRANSCRIPT_SHOW|ANSWER|MODELS|SET_MODEL|SET_LANGUAGE|STATUS|STATUS_FIELDS|QUIT`,
+- Send a command: `bin/rvwctl EXPLAIN_SPEECH|UNGARBLE_SPEECH|SCREENSHOT|SCREEN_VISION|SEARCH|RECALL|REINDEX|AUDIO_CAPTURE_TOGGLE|AUDIO_CAPTURE_START|AUDIO_CAPTURE_STOP|TRANSCRIPT_START|TRANSCRIPT_STOP|TRANSCRIPT_TOGGLE|TRANSCRIPT_SHOW|ANSWER|MODELS|SET_MODEL|SET_LANGUAGE|STATUS|STATUS_FIELDS|QUIT`,
   or each command's case-sensitive shortcut (E, C, s, V, f, r, R, c, c+, c-, t+, t-, t, T, A,
   ml, m, l, S, F, q)
   (`SEARCH <words>` and `RECALL <question>` take free text, e.g. `bin/rvwctl RECALL what did they say about reconnect behavior`)
@@ -104,7 +104,7 @@
   which the model's chat template reads as thinking already done: measured 0 reasoning tokens and
   a full EXPLAIN_SPEECH answer in ~5s, streaming included. The vision model is built with
   `suppress_reasoning=False`. Because the thinking channel is closed, a prompt that invites
-  deliberation makes the model deliberate in the visible answer: CLARIFY_SPEECH did this and rambled,
+  deliberation makes the model deliberate in the visible answer: UNGARBLE_SPEECH did this and rambled,
   so its prompt was tightened to a decisive, fixed three-part format ("do not think out loud, do
   not weigh options, do not reconsider"), verified terse over five runs on m3 (0.7-1.6s each).
   Keep that discipline in any new prompt built for this model.
