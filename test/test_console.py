@@ -1,7 +1,7 @@
 """Tests for the interactive console: pending context, prompt choice, submit.
 
 The console runs in the assistant's own terminal, so what is tested here is the
-line language (`s`, `S`, `c`, `C`, `pl`, `pN`, `?`, `:COMMAND`, `q`), the order
+line language (`s`, `S`, `c`, `C`, `pl`, `p X`, `?`, `:COMMAND`, `q`), the order
 context items are assembled into the model request, and the rules around when
 that context is cleared: only after a submit was actually queued.
 """
@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from rvw import config, screenshot
+from rvw import config, prompts, screenshot
 from rvw.assistant import Assistant, parse_arguments
 from rvw.console import Console
 from rvw.transcript import TranscriptSegment
@@ -54,9 +54,11 @@ class ConsoleTestCase(unittest.TestCase):
         self.saved_archive_dir = config.archive_dir
         self.saved_delay = config.console_capture_delay_seconds
         self.saved_auto_hide = config.auto_hide_console
+        self.saved_selected_prompt_path = config.selected_prompt_path
         config.archive_dir = self.root / "meetings"
         config.console_capture_delay_seconds = 0.0
         config.auto_hide_console = False
+        config.selected_prompt_path = self.root / "selected_prompt"
         self.addCleanup(self.restore_configuration)
         self.assistant = Assistant([])
         self.assistant._log_path = self.root / "session.log"
@@ -70,6 +72,7 @@ class ConsoleTestCase(unittest.TestCase):
         config.archive_dir = self.saved_archive_dir
         config.console_capture_delay_seconds = self.saved_delay
         config.auto_hide_console = self.saved_auto_hide
+        config.selected_prompt_path = self.saved_selected_prompt_path
         self.temporary_directory.cleanup()
 
     def _capture(self, session_epoch, target=None, exclude_window_id=None):
@@ -153,21 +156,23 @@ class LineLanguageTest(ConsoleTestCase):
             self.assertTrue(reply.startswith("FAIL "), line)
         self.assertEqual([], self.console.pending)
 
-    def test_pl_lists_the_prompts_and_the_current_selection(self):
+    def test_pl_lists_every_prompt_with_its_text_and_the_current_selection(self):
         reply = self.console.handle_line("pl")
-        self.assertIn("1", reply)
-        self.assertIn("2", reply)
-        self.assertIn("Understand meeting", reply)
-        self.assertIn("Critique code", reply)
+        self.assertTrue(reply.startswith("OK "), reply)
+        for key, prompt in prompts.prompts.items():
+            self.assertIn(key, reply)
+            self.assertIn(prompt, reply)
+        self.assertIn("* explain", reply)
 
-    def test_p_selects_a_prompt_by_number(self):
-        self.assertTrue(self.console.handle_line("p2").startswith("OK "))
-        self.assertEqual(2, self.console.selected_prompt)
+    def test_p_selects_a_prompt_by_its_letter_through_the_dispatcher(self):
+        reply = self.console.handle_line("p c")
+        self.assertTrue(reply.startswith("OK "), reply)
+        self.assertEqual("code_review", self.assistant._selected_prompt_key)
 
-    def test_an_invalid_prompt_number_fails_without_changing_the_selection(self):
-        for line in ["p0", "p3", "px", "p"]:
+    def test_an_invalid_prompt_letter_fails_without_changing_the_selection(self):
+        for line in ["p", "p 1", "p x", "p E", "p explain", "p e x", "p1"]:
             self.assertTrue(self.console.handle_line(line).startswith("FAIL "), line)
-        self.assertEqual(1, self.console.selected_prompt)
+        self.assertEqual("explain", self.assistant._selected_prompt_key)
 
     def test_question_mark_lists_aliases_and_each_dispatcher_command_with_its_purpose(self):
         reply = self.console.handle_line("?")
@@ -244,33 +249,38 @@ class RequestAssemblyTest(ConsoleTestCase):
                     "Screenshot 3 (shot_3.png):\ntext seen on shot_3.png\n\n")
         self.assertEqual(text.split("\n\n", 1)[1], expected)
 
-    def test_the_meeting_prompt_is_the_default_system_prompt(self):
+    def test_the_explain_prompt_is_the_default_system_prompt(self):
         self.console.handle_line("C look at this")
-        self.assertEqual("Understand meeting", self.console.prompt_label())
-        self.assertIn("You help me understand a live meeting.",
-                          self.request()[0]["content"])
+        self.assertEqual("explain", self.assistant._selected_prompt_key)
+        self.assertEqual(prompts.explain_system_prompt, self.request()[0]["content"])
 
     def test_the_code_review_prompt_replaces_the_system_prompt(self):
-        self.console.handle_line("p2")
+        self.console.handle_line("p c")
         self.console.handle_line("C review this diff")
-        self.assertIn("You are a code-review partner", self.request()[0]["content"])
+        self.assertEqual(prompts.code_review_system_prompt,
+                         self.request()[0]["content"])
 
-    def test_meeting_mode_includes_the_recent_transcript_when_there_is_one(self):
+    def test_explain_ungarble_and_visually_interpret_include_the_transcript(self):
         self.add_speech("the lease timeout was thirty seconds")
-        self.console.handle_line("C what did they say")
-        self.assertIn("Recent transcript:\n", self.user_text())
-        self.assertIn("lease timeout", self.user_text())
+        for letter in ["e", "u", "v"]:
+            self.console.handle_line("p " + letter)
+            self.console.handle_line("C go")
+            text = self.llm.requests[-1][1]["content"]
+            self.assertIn("Recent transcript:\n", text, letter)
+            self.assertIn("lease timeout", text, letter)
 
-    def test_meeting_mode_omits_the_transcript_section_when_empty(self):
+    def test_explain_omits_the_transcript_section_when_empty(self):
         self.console.handle_line("C anything")
         self.assertNotIn("Recent transcript:", self.user_text())
 
-    def test_code_review_mode_never_includes_a_transcript(self):
+    def test_recall_and_code_review_never_include_a_transcript(self):
         self.add_speech("the lease timeout was thirty seconds")
-        self.console.handle_line("p2")
-        self.console.handle_line("C review")
-        self.assertNotIn("Recent transcript:", self.user_text())
-        self.assertNotIn("lease timeout", self.user_text())
+        for letter in ["r", "c"]:
+            self.console.handle_line("p " + letter)
+            self.console.handle_line("C go")
+            text = self.llm.requests[-1][1]["content"]
+            self.assertNotIn("Recent transcript:", text, letter)
+            self.assertNotIn("lease timeout", text, letter)
 
 
 class SubmitSemanticsTest(ConsoleTestCase):
@@ -347,11 +357,27 @@ class SubmitSemanticsTest(ConsoleTestCase):
         self.assertEqual([], self.ocr_calls)
 
 
-class SourceNoneCaptureTest(unittest.TestCase):
+class AssistantInitTestCase(unittest.TestCase):
+    """Assistant([]) reads the persisted prompt selection, so isolate it."""
+
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.saved_selected_prompt_path = config.selected_prompt_path
+        config.selected_prompt_path = (Path(self.temporary_directory.name)
+                                       / "selected_prompt")
+        self.addCleanup(self.restore_configuration)
+
+    def restore_configuration(self):
+        config.selected_prompt_path = self.saved_selected_prompt_path
+        self.temporary_directory.cleanup()
+
+
+class SourceNoneCaptureTest(AssistantInitTestCase):
     """With no streams there is nothing to start: the capture commands must say
     so instead of reporting 'capture running' over an empty set."""
 
     def setUp(self):
+        super().setUp()
         self.assistant = Assistant([])
 
     def test_start_capture_fails_clearly(self):
@@ -440,7 +466,7 @@ class ConsoleReadLoopTest(ConsoleTestCase):
         self.assertLess(time.monotonic() - started, 5.0)
 
 
-class SourceNoneTest(unittest.TestCase):
+class SourceNoneTest(AssistantInitTestCase):
     """`--source none` exists for the console: no audio, no Whisper startup."""
 
     def test_the_argument_parser_accepts_source_none_and_console(self):

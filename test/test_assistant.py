@@ -11,14 +11,16 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from rvw import config
+from rvw import config, prompts
 from rvw.assistant import Assistant
 from rvw.llm import LocalLlmError
 from rvw.transcript import TranscriptSegment
 
 expected_commands = ["ANSWER", "AUDIO_CAPTURE_START", "AUDIO_CAPTURE_STOP",
                      "AUDIO_CAPTURE_TOGGLE", "EXPLAIN_SPEECH", "MODELS",
+                     "PROMPT_LIST", "PROMPT_SET",
                      "QUIT", "RECALL", "REINDEX", "SCREENSHOT", "SCREEN_VISION", "SEARCH",
                      "SET_LANGUAGE", "SET_MODEL", "STATUS", "STATUS_FIELDS",
                      "TRANSCRIPT_SHOW", "TRANSCRIPT_START", "TRANSCRIPT_STOP",
@@ -27,6 +29,7 @@ expected_commands = ["ANSWER", "AUDIO_CAPTURE_START", "AUDIO_CAPTURE_STOP",
 expected_shortcuts = {"ANSWER": "A", "AUDIO_CAPTURE_START": "c+",
                       "AUDIO_CAPTURE_STOP": "c-", "AUDIO_CAPTURE_TOGGLE": "c",
                       "EXPLAIN_SPEECH": "E", "MODELS": "ml",
+                      "PROMPT_LIST": "pl", "PROMPT_SET": "p",
                       "QUIT": "q", "RECALL": "r", "REINDEX": "R", "SCREENSHOT": "s",
                       "SCREEN_VISION": "V", "SEARCH": "f", "SET_LANGUAGE": "l",
                       "SET_MODEL": "m", "STATUS": "S", "STATUS_FIELDS": "F",
@@ -80,8 +83,10 @@ class AssistantCommandTestCase(unittest.TestCase):
         self.saved_archive_dir = config.archive_dir
         self.saved_helper_path = config.screen_capture_helper_path
         self.saved_index_db = config.index_db_path
+        self.saved_selected_prompt_path = config.selected_prompt_path
         config.archive_dir = self.root / "meetings"
         config.index_db_path = self.root / "index" / "meetings.db"
+        config.selected_prompt_path = self.root / "selected_prompt"
         self.addCleanup(self.restore_configuration)
         self.assistant = Assistant(["system"])
         # Answers write to the session log asynchronously; give the worker a
@@ -99,6 +104,7 @@ class AssistantCommandTestCase(unittest.TestCase):
         config.archive_dir = self.saved_archive_dir
         config.screen_capture_helper_path = self.saved_helper_path
         config.index_db_path = self.saved_index_db
+        config.selected_prompt_path = self.saved_selected_prompt_path
         self.temporary_directory.cleanup()
 
     def retain_a_meeting(self, text, started=None):
@@ -481,6 +487,78 @@ class InterpretWithoutAVisionModelTest(AssistantCommandTestCase):
         self.dispatch("SCREEN_VISION")
         time.sleep(0.2)
         self.assertEqual([], self.llm.requests)
+
+
+class PromptSelectionTest(AssistantCommandTestCase):
+    """One shared prompt selection for the console and the dispatcher, kept in
+    var/selected_prompt so it survives a restart."""
+
+    def test_the_default_selection_is_explain_and_writes_nothing(self):
+        self.assertEqual("explain", self.assistant._selected_prompt_key)
+        self.assertFalse(config.selected_prompt_path.exists())
+
+    def test_p_selects_a_prompt_and_persists_it(self):
+        reply = self.dispatch("p c")
+        self.assertTrue(reply.startswith("OK "), reply)
+        self.assertIn("code_review", reply)
+        self.assertEqual("code_review", self.assistant._selected_prompt_key)
+        self.assertEqual("code_review",
+                         config.selected_prompt_path.read_text(encoding="utf-8").strip())
+
+    def test_the_selection_survives_into_a_new_assistant(self):
+        self.dispatch("p v")
+        self.assertEqual("visually_interpret", Assistant([])._selected_prompt_key)
+
+    def test_an_invalid_persisted_value_is_fatal_at_startup(self):
+        config.selected_prompt_path.write_text("bogus\n", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            Assistant([])
+
+    def test_a_failed_write_leaves_the_selection_unchanged(self):
+        blocker = self.root / "not_a_directory"
+        blocker.write_text("i am a file", encoding="utf-8")
+        config.selected_prompt_path = blocker / "selected_prompt"
+        reply = self.dispatch("p c")
+        self.assertTrue(reply.startswith("FAIL "), reply)
+        self.assertEqual("explain", self.assistant._selected_prompt_key)
+
+    def test_a_replace_failure_is_a_fail_reply_and_leaves_everything_intact(self):
+        self.dispatch("p r")
+        with patch("rvw.prompts.os.replace", side_effect=OSError("disk full")):
+            reply = self.dispatch("p c")
+        self.assertTrue(reply.startswith("FAIL "), reply)
+        self.assertEqual("recall", self.assistant._selected_prompt_key)
+        self.assertEqual("recall", prompts.read_selected_prompt_key(
+            config.selected_prompt_path))
+        leftovers = [entry.name for entry in self.root.iterdir()
+                     if entry.name.startswith("selected_prompt")]
+        self.assertEqual(["selected_prompt"], leftovers)
+
+    def test_pl_lists_every_key_with_its_full_prompt_and_marks_the_active(self):
+        reply = self.dispatch("pl")
+        self.assertTrue(reply.startswith("OK "), reply)
+        for key, prompt in prompts.prompts.items():
+            self.assertIn(key, reply)
+            self.assertIn(prompt, reply)
+        self.assertIn("* explain", reply)
+        self.dispatch("p u")
+        self.assertIn("* ungarble", self.dispatch("pl"))
+
+    def test_invalid_selection_requests_change_nothing(self):
+        for command in ["p", "PROMPT_SET", "p e x", "p explain", "p x", "p E", "p 1"]:
+            reply = self.dispatch(command)
+            self.assertTrue(reply.startswith("FAIL "), command)
+            self.assertEqual("explain", self.assistant._selected_prompt_key)
+        self.assertFalse(config.selected_prompt_path.exists())
+
+    def test_the_named_commands_keep_their_own_prompts(self):
+        """EXPLAIN_SPEECH and friends name their prompt explicitly; the selection
+        only governs console submissions."""
+        self.dispatch("p c")
+        self.add_speech("the lease timeout was thirty seconds")
+        self.dispatch("UNGARBLE_SPEECH")
+        self.assertIn("reconstruct",
+                      self.wait_for_one_answer()[0][0]["content"].lower())
 
 
 class SearchCommandTest(AssistantCommandTestCase):

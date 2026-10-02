@@ -15,6 +15,10 @@ var_dir = repo_dir / "var"
 log_dir = var_dir / "log"
 run_dir = var_dir / "run"
 
+# The console's selected prompt, persisted across restarts; written only when
+# PROMPT_SET succeeds, read by every Assistant at start-up.
+selected_prompt_path = var_dir / "selected_prompt"
+
 capture_helper_path = bin_dir / "audio_capture"
 screen_capture_helper_path = bin_dir / "screen_capture"
 # RVW_CONTROL_SOCKET moves the socket for both ends; bin/rvwctl reads the same one.

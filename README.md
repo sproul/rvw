@@ -291,7 +291,9 @@ own remains the way to run in-terminal without a console for debugging) with an
 `rvw> ` prompt: `s` takes a
 screenshot and queues its OCR text, `S` queues and asks the model, `c TEXT` /
 `C TEXT` do the same for a typed comment, `send` resubmits after a busy reply,
-`pl` / `pN` choose the prompt, `:STATUS` and friends reach every socket
+`pl` lists the selectable prompts in full and `p X` selects one by letter
+(`c`, `e`, `r`, `u`, `v`; the choice is kept in `var/selected_prompt` and shared
+with `rvwctl pl` / `rvwctl p X`), `:STATUS` and friends reach every socket
 command, `q` quits. Software capture reads the screen, so the terminal running
 it needs Screen Recording permission.
 

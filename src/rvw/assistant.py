@@ -43,6 +43,8 @@ class Assistant:
                                     suppress_reasoning=False)
         self._meeting_index = meeting_index.MeetingIndex()
         self._index_built = False
+        self._selected_prompt_key = prompts.read_selected_prompt_key(
+            config.selected_prompt_path)
         self._answer_buffer = AnswerBuffer()
         self._dispatcher = self._build_dispatcher()
         self._control = ControlSocketServer(self._dispatcher)
@@ -193,6 +195,11 @@ class Assistant:
                  "explain recent speech with the text model (optional seconds)", "E"),
                 ("MODELS", self._command_models,
                  "list the model identifiers the endpoint serves and which answers", "ml"),
+                ("PROMPT_LIST", self._command_prompt_list,
+                 "list the prompts a console submission can be sent under", "pl"),
+                ("PROMPT_SET", self._command_prompt_set,
+                 "select the prompt console submissions use, by one letter "
+                 "(c, e, r, u, v)", "p"),
                 ("QUIT", self._command_quit, "stop the assistant", "q"),
                 ("RECALL", self._command_recall,
                  "answer a question from cited retained meeting passages", "r"),
@@ -399,6 +406,24 @@ class Assistant:
         self._llm = LocalLlm(model=identifier,
                              loads_on_demand=identifier == config.llm_model)
         return "questions now go to %s" % identifier
+
+    def _command_prompt_list(self, arguments):
+        """Every selectable prompt in full, the shared active one marked."""
+        return "prompts:\n" + prompts.render_prompt_listing(self._selected_prompt_key)
+
+    def _command_prompt_set(self, arguments):
+        """Choose the prompt console submissions run under; kept across restarts.
+
+        The file is written before the in-memory selection changes, so a
+        failed write leaves the session exactly as it was.
+        """
+        if len(arguments) != 1 or len(arguments[0]) != 1:
+            raise ValueError("PROMPT_SET takes exactly one letter argument "
+                             "(%s)" % ", ".join(sorted(prompts.prompt_letters)))
+        key = prompts.prompt_key_for_letter(arguments[0])
+        prompts.write_selected_prompt_key(config.selected_prompt_path, key)
+        self._selected_prompt_key = key
+        return "console submissions now use prompt %s" % key
 
     def _command_set_language(self, arguments):
         """Tell the recogniser which language it is listening to from now on."""
