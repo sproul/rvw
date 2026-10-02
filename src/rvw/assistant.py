@@ -169,7 +169,8 @@ class Assistant:
         """What this run will do, not what the keys are: the keys and the menu are
         declared in hammerspoon/rvw_config.lua and the menu bar lists them, so
         repeating them here only creates a second version to keep right."""
-        log.info("OK  ready. EXPLAIN covers the last %ds, CLARIFY the last %ds; the menu bar "
+        log.info("OK  ready. EXPLAIN_SPEECH covers the last %ds, CLARIFY_SPEECH the last %ds; "
+                 "the menu bar "
                  "lists every hotkey and both windows",
                  int(config.explain_window_seconds), int(config.clarify_window_seconds))
         log.info("OK  screenshots are archived under %s", self._archive.directory)
@@ -179,29 +180,51 @@ class Assistant:
 
     def _build_dispatcher(self):
         dispatcher = CommandDispatcher()
-        for name, handler in [("ANSWER", self._command_answer),
-                              ("CLARIFY", self._command_clarify),
-                              ("EXPLAIN", self._command_explain),
-                              ("INTERPRET_SCREEN", self._command_interpret_screen),
-                              ("MODELS", self._command_models),
-                              ("RECALL", self._command_recall),
-                              ("REINDEX", self._command_reindex),
-                              ("SCREENSHOT", self._command_screenshot),
-                              ("SEARCH", self._command_search),
-                              ("SET_LANGUAGE", self._command_set_language),
-                              ("SET_MODEL", self._command_set_model),
-                              ("START_CAPTURE", self._command_start_capture),
-                              ("START_RETAINING", self._command_start_retaining),
-                              ("STATUS", self._command_status),
-                              ("STATUS_FIELDS", self._command_status_fields),
-                              ("STOP_CAPTURE", self._command_stop_capture),
-                              ("STOP_RETAINING", self._command_stop_retaining),
-                              ("TOGGLE_CAPTURE", self._command_toggle_capture),
-                              ("TOGGLE_CONTINUOUS", self._command_toggle_continuous),
-                              ("TOGGLE_RETENTION", self._command_toggle_retention),
-                              ("TRANSCRIPT", self._command_transcript),
-                              ("QUIT", self._command_quit)]:
-            dispatcher.register(name, handler)
+        for name, handler, description, shortcut in [
+                ("ANSWER", self._command_answer,
+                 "show the answer being written or the latest answer", "A"),
+                ("AUDIO_CAPTURE_START", self._command_start_capture,
+                 "start the configured audio streams, or a named mic/system", "c+"),
+                ("AUDIO_CAPTURE_STOP", self._command_stop_capture,
+                 "stop audio capture", "c-"),
+                ("AUDIO_CAPTURE_TOGGLE", self._command_toggle_capture,
+                 "toggle audio capture", "c"),
+                ("CLARIFY_SPEECH", self._command_clarify,
+                 "clarify recent speech with the text model (optional seconds)", "C"),
+                ("EXPLAIN_SPEECH", self._command_explain,
+                 "explain recent speech with the text model (optional seconds)", "E"),
+                ("MODELS", self._command_models,
+                 "list the model identifiers the endpoint serves and which answers", "ml"),
+                ("QUIT", self._command_quit, "stop the assistant", "q"),
+                ("RECALL", self._command_recall,
+                 "answer a question from cited retained meeting passages", "r"),
+                ("REINDEX", self._command_reindex,
+                 "rebuild the retained transcript search index", "R"),
+                ("SCREEN_VISION", self._command_interpret_screen,
+                 "archive a screenshot and ask the vision model about it with "
+                 "recent speech, if that model is served", "V"),
+                ("SCREENSHOT", self._command_screenshot,
+                 "archive a screenshot, without OCR or a model", "s"),
+                ("SEARCH", self._command_search,
+                 "search retained meeting transcripts for words", "f"),
+                ("SET_LANGUAGE", self._command_set_language,
+                 "set the recognition language for the next utterances", "l"),
+                ("SET_MODEL", self._command_set_model,
+                 "choose a model identifier the endpoint already serves "
+                 "(does not load a new model)", "m"),
+                ("STATUS", self._command_status,
+                 "human readable session state", "S"),
+                ("STATUS_FIELDS", self._command_status_fields,
+                 "session state as machine readable key=value pairs", "F"),
+                ("TRANSCRIPT_SHOW", self._command_transcript,
+                 "show the recent speech transcript (optional seconds)", "T"),
+                ("TRANSCRIPT_START", self._command_start_retaining,
+                 "start keeping the transcript from now on", "t+"),
+                ("TRANSCRIPT_STOP", self._command_stop_retaining,
+                 "stop keeping the transcript", "t-"),
+                ("TRANSCRIPT_TOGGLE", self._command_toggle_retention,
+                 "toggle transcript retention", "t")]:
+            dispatcher.register(name, handler, description, shortcut=shortcut)
         return dispatcher
 
     def _command_start_capture(self, arguments):
@@ -427,7 +450,7 @@ class Assistant:
 
     def _start_transcript_answer(self, build_messages, arguments, default_window_seconds,
                                  heading):
-        """Ask the text model about the recent transcript; EXPLAIN and CLARIFY differ only here."""
+        """Ask the text model about the recent transcript; the two commands differ only here."""
         window_seconds = self._requested_window_seconds(arguments, default_window_seconds)
         transcript_text = self._transcript.render_window(window_seconds, now=time.time())
         messages = build_messages(transcript_text, window_seconds)
@@ -484,7 +507,7 @@ class Assistant:
         if time.monotonic() - self._last_continuous_analysis < config.continuous_analysis_period_seconds:
             return
         self._last_continuous_analysis = time.monotonic()
-        log.info("%s", self._dispatcher.dispatch("EXPLAIN %d"
+        log.info("%s", self._dispatcher.dispatch("EXPLAIN_SPEECH %d"
                                                  % config.continuous_analysis_period_seconds))
 
     def _answer(self, llm, messages, context_text, heading):

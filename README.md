@@ -38,15 +38,15 @@ of the Mac's own audio output as two separate streams, local speech recognition 
 a rolling in-memory transcript, and one hotkey that sends roughly the last 60 seconds
 of text to a local LLM and streams the explanation back to the assistant's terminal.
 
-**Phase 2, making it usable.** `CLARIFY`, a second, shorter transcript command whose
+**Phase 2, making it usable.** `CLARIFY_SPEECH`, a second, shorter transcript command whose
 prompt asks what words were actually said rather than what they meant - the answer to
 a strong accent or a bad recognition. `SCREENSHOT`, an archival-only capture of the
 frontmost window with its metadata, silent on success so that nothing appears in a
-shared screen. `INTERPRET_SCREEN`, the identical save followed by a private
+shared screen. `SCREEN_VISION`, the identical save followed by a private
 interpretation from a local vision model.
 
 **Phase 3, optional transcript retention.** A session is ephemeral by default and
-writes nothing at all. `TOGGLE_RETENTION` switches it to keeping a canonical
+writes nothing at all. `TRANSCRIPT_TOGGLE` switches it to keeping a canonical
 `transcript.jsonl`, with `metadata.json` beside it and a derived `transcript.md`.
 Retention is not retrospective in either direction.
 
@@ -244,31 +244,37 @@ vision model are loaded. It is then listening for commands.
 
 | Key | Command | What it does |
 | --- | --- | --- |
-| alt-cmd-R | `TOGGLE_CAPTURE` | start or stop capturing |
-| ctrl-alt-cmd-R | `TOGGLE_CONTINUOUS` | capture and explain every 120 s |
-| alt-cmd-E | `EXPLAIN` | explain the last 60 s |
-| alt-cmd-C | `CLARIFY` | reconstruct the words of the last 45 s |
+| alt-cmd-R | `AUDIO_CAPTURE_TOGGLE` | start or stop capturing |
+| alt-cmd-E | `EXPLAIN_SPEECH` | explain the last 60 s |
+| alt-cmd-C | `CLARIFY_SPEECH` | reconstruct the words of the last 45 s |
 | alt-cmd-S | `SCREENSHOT` | archive the frontmost window; silent on success |
-| ctrl-alt-cmd-S | `INTERPRET_SCREEN` | the same save, then a private interpretation |
-| alt-cmd-T | `TOGGLE_RETENTION` | start or stop keeping this transcript |
+| ctrl-alt-cmd-S | `SCREEN_VISION` | the same save, then a private interpretation |
+| alt-cmd-T | `TRANSCRIPT_TOGGLE` | start or stop keeping this transcript |
 
 ### Commands
 
 Anything the hotkeys do, and more, over the socket:
 
+Every command also answers to a short case-sensitive alias, shown after the `#`:
+
 ```bash
-bin/rvwctl EXPLAIN [seconds]
-bin/rvwctl CLARIFY [seconds]
-bin/rvwctl SCREENSHOT
-bin/rvwctl INTERPRET_SCREEN [seconds]
-bin/rvwctl SEARCH <words>
-bin/rvwctl RECALL <question>
-bin/rvwctl REINDEX
-bin/rvwctl START_CAPTURE [mic|system] / STOP_CAPTURE / TOGGLE_CAPTURE
-bin/rvwctl TOGGLE_CONTINUOUS
-bin/rvwctl START_RETAINING / STOP_RETAINING / TOGGLE_RETENTION
-bin/rvwctl STATUS
-bin/rvwctl QUIT
+bin/rvwctl EXPLAIN_SPEECH [seconds]        # E
+bin/rvwctl CLARIFY_SPEECH [seconds]        # C
+bin/rvwctl SCREENSHOT                      # s
+bin/rvwctl SCREEN_VISION [seconds]         # V
+bin/rvwctl SEARCH <words>                  # f
+bin/rvwctl RECALL <question>               # r
+bin/rvwctl REINDEX                         # R
+bin/rvwctl AUDIO_CAPTURE_START [mic|system] / AUDIO_CAPTURE_STOP / AUDIO_CAPTURE_TOGGLE
+                                           # c+ / c- / c
+bin/rvwctl TRANSCRIPT_START / TRANSCRIPT_STOP / TRANSCRIPT_TOGGLE
+                                           # t+ / t- / t
+bin/rvwctl TRANSCRIPT_SHOW [seconds]       # T
+bin/rvwctl ANSWER                          # A
+bin/rvwctl MODELS / SET_MODEL <identifier> # ml / m
+bin/rvwctl SET_LANGUAGE <language>         # l
+bin/rvwctl STATUS / STATUS_FIELDS          # S / F
+bin/rvwctl QUIT                            # q
 ```
 
 `SEARCH` and `RECALL` take free text, which is why they are commands rather than
@@ -406,7 +412,7 @@ and the real model, Phase 3 on the M3, Phase 4 against a synthetic archive.
 
 Outstanding, in rough order of how much it matters:
 
-- `INTERPRET_SCREEN` against a real vision model. None is downloaded on either
+- `SCREEN_VISION` against a real vision model. None is downloaded on either
   machine, so the command archives the image and says plainly that nothing
   interpreted it.
 - The microphone as a transcript stream on the M4. The permission is granted and the
@@ -420,7 +426,7 @@ Outstanding, in rough order of how much it matters:
 
 Known rough edges: only one answer runs at a time, so a second hotkey during a
 streaming answer is refused rather than queued; continuous analysis is a plain timer
-re-running EXPLAIN; the interpretation is printed in the assistant's terminal, which is
+re-running EXPLAIN_SPEECH; the interpretation is printed in the assistant's terminal, which is
 private only as long as that terminal is not the window being shared; `--target
 display` captures the main display only; Whisper checks Hugging Face for the model
 revision at start-up unless `HF_HUB_OFFLINE=1`.

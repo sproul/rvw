@@ -42,7 +42,9 @@
 - Run the tests: `util/run_tests.sh` (unittest, no pytest in the venv)
 - Run the assistant: `bin/rvw [--source mic|system|both] [--listen] [--debug]`, which starts it
   inside `bin/rvw.app`; `bin/rvw -here ...` runs it in this terminal instead
-- Send a command: `bin/rvwctl EXPLAIN|CLARIFY|SCREENSHOT|INTERPRET_SCREEN|SEARCH|RECALL|REINDEX|TOGGLE_CAPTURE|TOGGLE_CONTINUOUS|START_RETAINING|STOP_RETAINING|TOGGLE_RETENTION|TRANSCRIPT|ANSWER|MODELS|SET_MODEL|SET_LANGUAGE|STATUS|STATUS_FIELDS|QUIT`
+- Send a command: `bin/rvwctl EXPLAIN_SPEECH|CLARIFY_SPEECH|SCREENSHOT|SCREEN_VISION|SEARCH|RECALL|REINDEX|AUDIO_CAPTURE_TOGGLE|AUDIO_CAPTURE_START|AUDIO_CAPTURE_STOP|TRANSCRIPT_START|TRANSCRIPT_STOP|TRANSCRIPT_TOGGLE|TRANSCRIPT_SHOW|ANSWER|MODELS|SET_MODEL|SET_LANGUAGE|STATUS|STATUS_FIELDS|QUIT`,
+  or each command's case-sensitive shortcut (E, C, s, V, f, r, R, c, c+, c-, t+, t-, t, T, A,
+  ml, m, l, S, F, q)
   (`SEARCH <words>` and `RECALL <question>` take free text, e.g. `bin/rvwctl RECALL what did they say about reconnect behavior`)
 - Show one window by hand: `bin/rvw_view --window transcript|answer [--seconds 300]`; the
   menu bar and alt-cmd-W / ctrl-alt-cmd-W do the same thing
@@ -71,8 +73,8 @@
   `src/rvw/model_loader.py` loads it again on the first question, which costs that one
   question about 45s. An unloaded model is ordinary and is logged INFO, not FAIL.
 - A session is ephemeral unless asked otherwise and then writes nothing at all: the rolling
-  transcript lives in memory and ages out. `TOGGLE_RETENTION` (alt-cmd-T), `START_RETAINING`
-  and `STOP_RETAINING` switch it, `STATUS` reports it, and `RVW_RETENTION=retained` makes a
+  transcript lives in memory and ages out. `TRANSCRIPT_TOGGLE` (alt-cmd-T), `TRANSCRIPT_START`
+  and `TRANSCRIPT_STOP` switch it, `STATUS` reports it, and `RVW_RETENTION=retained` makes a
   session start out keeping its transcript.
 - Retention is not retrospective: switching it on keeps the speech from that moment, not what
   is still sitting in the rolling window, which was said while the session was ephemeral.
@@ -100,13 +102,13 @@
   1023/1024 tokens, empty), which is what made it look unusable. `llm.py` therefore prefills a
   closed, empty `<think></think>` block as the start of the assistant turn (`config.reasoning_prefill`),
   which the model's chat template reads as thinking already done: measured 0 reasoning tokens and
-  a full EXPLAIN answer in ~5s, streaming included. The vision model is built with
+  a full EXPLAIN_SPEECH answer in ~5s, streaming included. The vision model is built with
   `suppress_reasoning=False`. Because the thinking channel is closed, a prompt that invites
-  deliberation makes the model deliberate in the visible answer: CLARIFY did this and rambled,
+  deliberation makes the model deliberate in the visible answer: CLARIFY_SPEECH did this and rambled,
   so its prompt was tightened to a decisive, fixed three-part format ("do not think out loud, do
   not weigh options, do not reconsider"), verified terse over five runs on m3 (0.7-1.6s each).
   Keep that discipline in any new prompt built for this model.
-- `INTERPRET_SCREEN` needs a vision model loaded as `meeting-vision`; override with
+- `SCREEN_VISION` needs a vision model loaded as `meeting-vision`; override with
   `RVW_VLM_MODEL`. Everything else works without it. Without one it archives the image
   and replies `not interpreted: no model is loaded as 'meeting-vision'`.
 - This LM Studio build answers a request for an identifier it does not serve with
@@ -147,7 +149,7 @@
   loaded `rvw_*` module first: Hammerspoon holds its own copy from whenever its
   configuration was loaded, and a test measuring that copy would pass on a broken checkout.
 - The transcript and answer windows are `bin/rvw_view`, one process per window, polling
-  `TRANSCRIPT` and `ANSWER`. They exist as a separate Swift program because only
+  `TRANSCRIPT_SHOW` and `ANSWER`. They exist as a separate Swift program because only
   `NSWindow.sharingType = .none` makes a window invisible to ScreenCaptureKit, Zoom, Meet,
   Teams and this assistant's own screenshot helper; Hammerspoon cannot set it, and it could
   not go into `bin/rvw.app` without voiding that bundle's permissions. If the window server

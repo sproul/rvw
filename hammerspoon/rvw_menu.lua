@@ -39,7 +39,8 @@ end
 local function single_source_item(status, stream_name)
   return {title = "Listen to " .. (config.stream_titles[stream_name] or stream_name),
           checked = capture_includes(status, stream_name),
-          fn = run_and_refresh({commands = {"STOP_CAPTURE", "START_CAPTURE " .. stream_name}})}
+          fn = run_and_refresh({commands = {"AUDIO_CAPTURE_STOP",
+                                            "AUDIO_CAPTURE_START " .. stream_name}})}
 end
 
 local function every_stream_is_capturing(status)
@@ -58,23 +59,21 @@ local function source_items(status)
   if #names > 1 then
     table.insert(items, {title = "Listen to everything",
                          checked = every_stream_is_capturing(status),
-                         fn = run_and_refresh({commands = {"START_CAPTURE"}})})
+                         fn = run_and_refresh({commands = {"AUDIO_CAPTURE_START"}})})
   end
   for _, name in ipairs(names) do
     table.insert(items, single_source_item(status, name))
   end
   table.insert(items, {title = "Stop listening", disabled = not state.is_listening(status),
-                       fn = run_and_refresh({command = "STOP_CAPTURE"})})
+                       fn = run_and_refresh({command = "AUDIO_CAPTURE_STOP"})})
   return items
 end
 
 local function toggle_items(status)
   return {
-    {title = "Analyse continuously", checked = state.is_analysing(status),
-     fn = run_and_refresh({command = "TOGGLE_CONTINUOUS"})},
     {title = "Keep the transcript of this conversation",
      checked = state.is_retaining(status),
-     fn = run_and_refresh({command = "TOGGLE_RETENTION"})},
+     fn = run_and_refresh({command = "TRANSCRIPT_TOGGLE"})},
     {title = "Presenting: draw nothing on this screen", checked = presenting.is_on(),
      disabled = presenting.share_is_detected() and not presenting.is_forced(),
      fn = run_and_refresh({local_action = "toggle_presenting"})},

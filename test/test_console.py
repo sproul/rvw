@@ -169,17 +169,49 @@ class LineLanguageTest(ConsoleTestCase):
             self.assertTrue(self.console.handle_line(line).startswith("FAIL "), line)
         self.assertEqual(1, self.console.selected_prompt)
 
-    def test_question_mark_lists_aliases_and_every_dispatcher_command(self):
+    def test_question_mark_lists_aliases_and_each_dispatcher_command_with_its_purpose(self):
         reply = self.console.handle_line("?")
-        for alias in ["s", "S", "c", "C", "pl", "p1", "?", "q"]:
+        for alias in ["s  ", "S  ", "c TEXT", "pl", "send", "?", "q  quit"]:
             self.assertIn(alias, reply)
-        for name in self.assistant._dispatcher.command_names():
-            self.assertIn(name, reply)
+        self.assertIn(":C  CLARIFY_SPEECH", reply)
+        self.assertIn(":NAME", reply)
+        names = self.assistant._dispatcher.command_names()
+        lines = reply.splitlines()
+        for shortcut, name, description in self.assistant._dispatcher.command_help():
+            matches = [line for line in lines
+                       if line.startswith(":%s  %s  " % (shortcut, name))]
+            self.assertEqual(1, len(matches), "expected one :%s  %s line" % (shortcut, name))
+            self.assertTrue(matches[0].split(name, 1)[1].strip(),
+                            ":%s carries no explanation" % name)
+        colon_names = [line.split()[1] for line in lines
+                       if line.startswith(":") and line.split()[1] in names]
+        self.assertEqual(sorted(names), colon_names)
+
+    def test_every_dispatcher_command_has_a_nonempty_description(self):
+        for _shortcut, _name, description in self.assistant._dispatcher.command_help():
+            self.assertTrue(description.strip(), _name)
+
+    def test_help_distinguishes_archiving_from_the_screenshot_alias(self):
+        reply = self.console.handle_line("?")
+        screenshot_lines = [line for line in reply.splitlines()
+                            if line.startswith(":s  SCREENSHOT  ")]
+        self.assertEqual(1, len(screenshot_lines))
+        self.assertIn("without", screenshot_lines[0].lower())
 
     def test_a_colon_dispatches_the_existing_command_set(self):
         reply = self.console.handle_line(":STATUS")
         self.assertTrue(reply.startswith("OK "), reply)
         self.assertIn("capture:", reply)
+
+    def test_a_colon_dispatches_a_shortcut(self):
+        reply = self.console.handle_line(":S")
+        self.assertTrue(reply.startswith("OK "), reply)
+        self.assertIn("capture:", reply)
+
+    def test_a_colon_shortcut_passes_its_arguments(self):
+        reply = self.console.handle_line(":t+")
+        self.assertTrue(reply.startswith("OK "), reply)
+        self.assertTrue(self.assistant._archive.is_retaining)
 
     def test_an_unknown_colon_command_is_a_fail_reply(self):
         self.assertTrue(self.console.handle_line(":DEFINITELY_NOT").startswith("FAIL "))
@@ -323,16 +355,18 @@ class SourceNoneCaptureTest(unittest.TestCase):
         self.assistant = Assistant([])
 
     def test_start_capture_fails_clearly(self):
-        reply = self.assistant._dispatcher.dispatch("START_CAPTURE")
+        reply = self.assistant._dispatcher.dispatch("AUDIO_CAPTURE_START")
         self.assertTrue(reply.startswith("FAIL "), reply)
         self.assertIn("no capture streams", reply)
 
     def test_toggle_capture_fails_clearly(self):
-        self.assertTrue(self.assistant._dispatcher.dispatch("TOGGLE_CAPTURE").startswith("FAIL "))
+        self.assertTrue(self.assistant._dispatcher.dispatch("AUDIO_CAPTURE_TOGGLE")
+                        .startswith("FAIL "))
 
-    def test_toggle_continuous_fails_and_does_not_arm_the_timer(self):
+    def test_continuous_analysis_is_no_longer_a_command(self):
         reply = self.assistant._dispatcher.dispatch("TOGGLE_CONTINUOUS")
         self.assertTrue(reply.startswith("FAIL "), reply)
+        self.assertIn("unknown command", reply)
         self.assertFalse(self.assistant._continuous_analysis.is_set())
 
 
@@ -343,7 +377,7 @@ class ConsoleTickerTest(ConsoleTestCase):
     def setUp(self):
         super().setUp()
         self.saved_period = config.continuous_analysis_period_seconds
-        # The period is also the transcript window EXPLAIN looks at, so it must
+        # The period is also the transcript window EXPLAIN_SPEECH looks at, so it must
         # reach the utterance added below; _last_continuous_analysis starts at
         # 0, so the first tick is due immediately either way.
         config.continuous_analysis_period_seconds = 60.0
@@ -358,7 +392,7 @@ class ConsoleTickerTest(ConsoleTestCase):
         ticker = threading.Thread(target=self.assistant._console_ticks, daemon=True)
         ticker.start()
         try:
-            self.assertTrue(self.wait_for_one_answer(), "EXPLAIN was never asked")
+            self.assertTrue(self.wait_for_one_answer(), "EXPLAIN_SPEECH was never asked")
         finally:
             self.assistant._quit_requested.set()
             ticker.join(timeout=5)

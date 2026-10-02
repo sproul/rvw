@@ -242,8 +242,8 @@ struct Options {
 
     var command: String {
         if window_kind == "answer" { return "ANSWER" }
-        guard let seconds = window_seconds else { return "TRANSCRIPT" }
-        return "TRANSCRIPT \(seconds)"
+        guard let seconds = window_seconds else { return "TRANSCRIPT_SHOW" }
+        return "TRANSCRIPT_SHOW \(seconds)"
     }
 }
 

@@ -4,9 +4,9 @@
 Deliberately uses the system python and nothing but the standard library:
 this runs on every hotkey press, so start-up time is the whole design.
 
-    rvwctl EXPLAIN
-    rvwctl TOGGLE_CAPTURE
-    rvwctl STATUS
+    rvwctl EXPLAIN_SPEECH
+    rvwctl AUDIO_CAPTURE_TOGGLE
+    rvwctl S           # the STATUS shortcut
 """
 
 import os

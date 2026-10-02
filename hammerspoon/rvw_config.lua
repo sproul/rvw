@@ -12,21 +12,19 @@ local config = {}
 config.status_poll_seconds = 5
 
 config.hotkeys = {
-  {mods = {"alt", "cmd"}, key = "r", command = "TOGGLE_CAPTURE",
+  {mods = {"alt", "cmd"}, key = "r", command = "AUDIO_CAPTURE_TOGGLE",
    description = "capture and transcribe"},
-  {mods = {"ctrl", "alt", "cmd"}, key = "r", command = "TOGGLE_CONTINUOUS",
-   description = "capture, transcribe and analyse continuously"},
-  {mods = {"alt", "cmd"}, key = "e", command = "EXPLAIN",
+  {mods = {"alt", "cmd"}, key = "e", command = "EXPLAIN_SPEECH",
    description = "explain the last minute"},
-  {mods = {"alt", "cmd"}, key = "c", command = "CLARIFY",
+  {mods = {"alt", "cmd"}, key = "c", command = "CLARIFY_SPEECH",
    description = "clarify what was just said"},
   {mods = {"alt", "cmd"}, key = "s", command = "SCREENSHOT", silent = true,
    description = "screenshot, save only"},
-  {mods = {"ctrl", "alt", "cmd"}, key = "s", command = "INTERPRET_SCREEN", silent = true,
+  {mods = {"ctrl", "alt", "cmd"}, key = "s", command = "SCREEN_VISION", silent = true,
    description = "screenshot, save and interpret"},
   -- Retention is the one command worth an alert even mid-meeting: whether this
   -- conversation is being kept is not something to be unsure about.
-  {mods = {"alt", "cmd"}, key = "t", command = "TOGGLE_RETENTION",
+  {mods = {"alt", "cmd"}, key = "t", command = "TRANSCRIPT_TOGGLE",
    description = "keep or stop keeping the transcript"},
   {mods = {"alt", "cmd"}, key = "p", local_action = "toggle_presenting",
    description = "presenting: draw nothing on this screen"},
@@ -41,10 +39,10 @@ config.hotkeys = {
 -- The menu items below the capture and retention state. Anything reached by a
 -- hotkey is here too, because the menu is also the reminder of what exists.
 config.menu_actions = {
-  {title = "Explain the last minute", command = "EXPLAIN"},
-  {title = "Clarify what was just said", command = "CLARIFY"},
+  {title = "Explain the last minute", command = "EXPLAIN_SPEECH"},
+  {title = "Clarify what was just said", command = "CLARIFY_SPEECH"},
   {title = "Screenshot", command = "SCREENSHOT", silent = true},
-  {title = "Screenshot and interpret", command = "INTERPRET_SCREEN", silent = true},
+  {title = "Screenshot and interpret", command = "SCREEN_VISION", silent = true},
   {title = "Rebuild the search index", command = "REINDEX"},
 }
 

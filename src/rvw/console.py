@@ -9,8 +9,8 @@ context; the upper-case forms submit it to the local text model:
     c TEXT    append TEXT as a comment
     C TEXT    the same, then submit
     pl        list the prompts; pN selects prompt number N
-    :COMMAND  any dispatcher command, e.g. :STATUS or :SCREENSHOT
-    ?         this list plus every dispatcher command name
+    :COMMAND  any dispatcher command or its shortcut, e.g. :STATUS or :S
+    ?         this list plus every dispatcher command and its shortcut
     q         quit
 
 The model is only ever sent OCR text, never the image: what it "sees" is the
@@ -316,10 +316,13 @@ class Console:
             "c TEXT / C TEXT  queue a comment / queue and submit",
             "pl list prompts; pN select prompt N (p1, p2, ...)",
             "send  submit the queued context as it is",
-            ":CMD run a dispatcher command, e.g. :STATUS :SCREENSHOT",
+            ":CMD run a dispatcher command or its shortcut, e.g. :STATUS :S",
             "?  this list",
             "q  quit",
         ]
-        return ("OK console commands:\n%s\n\ndispatcher commands: %s"
-                % ("\n".join(aliases),
-                   ", ".join(self._assistant._dispatcher.command_names())))
+        dispatcher_lines = [":%s  %s  %s" % (shortcut, name, description)
+                            for shortcut, name, description
+                            in self._assistant._dispatcher.command_help()]
+        return ("OK console commands:\n%s\n\ndispatcher commands; canonical commands also "
+                "work through :NAME:\n%s"
+                % ("\n".join(aliases), "\n".join(dispatcher_lines)))

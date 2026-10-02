@@ -17,7 +17,7 @@
 # An absent identifier is reported as INFO, and this listing says exactly what
 # the running assistant says about the same state. Neither absence is a fault.
 # LM Studio unloads the LLM after an idle hour by design and model_loader loads
-# it again on the first question; a vision model is optional and INTERPRET_SCREEN
+# it again on the first question; a vision model is optional and SCREEN_VISION
 # declines cleanly without one. Spending FAIL on either would teach the reader to
 # ignore the word. The one genuine failure here is an endpoint serving nothing.
 
@@ -70,10 +70,10 @@ report_the_identifiers_the_assistant_asks_for() {
         log_fail "nothing is served at port $(read_llm_server_port); start it with 'lms server start'"
         return 1
     fi
-    report_one_identifier "$(read_assistant_setting llm_model)" "EXPLAIN and CLARIFY" "$served" \
+    report_one_identifier "$(read_assistant_setting llm_model)" "EXPLAIN_SPEECH and CLARIFY_SPEECH" "$served" \
         "it is loaded when it is first needed, which makes that one question slow"
-    report_one_identifier "$(read_assistant_setting vision_llm_model)" "INTERPRET_SCREEN" "$served" \
-        "INTERPRET_SCREEN declines instead of answering, and alt-cmd-S still archives screenshots"
+    report_one_identifier "$(read_assistant_setting vision_llm_model)" "SCREEN_VISION" "$served" \
+        "SCREEN_VISION declines instead of answering, and alt-cmd-S still archives screenshots"
 }
 
 # Each identifier carries its own account of what an absence means, because the

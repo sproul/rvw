@@ -166,7 +166,6 @@ class MenuContentsTest(lua_testing.PureLuaTestCase):
         titles = self.titles(busy_status)
         self.assertIn("Listen to everything [checked]", titles)
         self.assertIn("Keep the transcript of this conversation [checked]", titles)
-        self.assertIn("Analyse continuously [checked]", titles)
 
     def test_nothing_is_ticked_in_an_idle_session(self):
         self.assertEqual([], [title for title in self.titles(idle_status)

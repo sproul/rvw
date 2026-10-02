@@ -1,6 +1,6 @@
 """Measure one loaded local model on this machine, with comparable numbers.
 
-Runs three fixed prompts -- the real EXPLAIN, CLARIFY and RECALL framings the
+Runs three fixed prompts -- the real EXPLAIN_SPEECH, CLARIFY_SPEECH and RECALL framings the
 assistant sends -- against a model that is already loaded in LM Studio, and
 reports the numbers that decide whether a model is usable live on this machine:
 whether it fit without swapping, how long until the first token, how fast it then
@@ -39,8 +39,8 @@ def standard_cases():
     passages = recall.numbered_passages([
         _passage("the coordinator lease timeout was thirty seconds", "2026-08-20T09:00:05"),
         _passage("the client should reconnect with exponential backoff", "2026-08-20T09:00:09")])
-    return [("EXPLAIN", prompts.build_explain_messages(TRANSCRIPT, 60)),
-            ("CLARIFY", prompts.build_clarify_messages(TRANSCRIPT, 45)),
+    return [("EXPLAIN_SPEECH", prompts.build_explain_messages(TRANSCRIPT, 60)),
+            ("CLARIFY_SPEECH", prompts.build_clarify_messages(TRANSCRIPT, 45)),
             ("RECALL", prompts.build_recall_messages(
                 "what did they say about reconnect behavior", passages))]
 

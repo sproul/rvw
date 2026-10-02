@@ -17,11 +17,25 @@ from rvw.assistant import Assistant
 from rvw.llm import LocalLlmError
 from rvw.transcript import TranscriptSegment
 
-expected_commands = ["ANSWER", "CLARIFY", "EXPLAIN", "INTERPRET_SCREEN", "MODELS", "QUIT",
-                     "RECALL", "REINDEX", "SCREENSHOT", "SEARCH", "SET_LANGUAGE", "SET_MODEL",
-                     "START_CAPTURE", "START_RETAINING", "STATUS", "STATUS_FIELDS",
-                     "STOP_CAPTURE", "STOP_RETAINING", "TOGGLE_CAPTURE", "TOGGLE_CONTINUOUS",
-                     "TOGGLE_RETENTION", "TRANSCRIPT"]
+expected_commands = ["ANSWER", "AUDIO_CAPTURE_START", "AUDIO_CAPTURE_STOP",
+                     "AUDIO_CAPTURE_TOGGLE", "CLARIFY_SPEECH", "EXPLAIN_SPEECH", "MODELS",
+                     "QUIT", "RECALL", "REINDEX", "SCREENSHOT", "SCREEN_VISION", "SEARCH",
+                     "SET_LANGUAGE", "SET_MODEL", "STATUS", "STATUS_FIELDS",
+                     "TRANSCRIPT_SHOW", "TRANSCRIPT_START", "TRANSCRIPT_STOP",
+                     "TRANSCRIPT_TOGGLE"]
+
+expected_shortcuts = {"ANSWER": "A", "AUDIO_CAPTURE_START": "c+",
+                      "AUDIO_CAPTURE_STOP": "c-", "AUDIO_CAPTURE_TOGGLE": "c",
+                      "CLARIFY_SPEECH": "C", "EXPLAIN_SPEECH": "E", "MODELS": "ml",
+                      "QUIT": "q", "RECALL": "r", "REINDEX": "R", "SCREENSHOT": "s",
+                      "SCREEN_VISION": "V", "SEARCH": "f", "SET_LANGUAGE": "l",
+                      "SET_MODEL": "m", "STATUS": "S", "STATUS_FIELDS": "F",
+                      "TRANSCRIPT_SHOW": "T", "TRANSCRIPT_START": "t+",
+                      "TRANSCRIPT_STOP": "t-", "TRANSCRIPT_TOGGLE": "t"}
+
+former_commands = ["CLARIFY", "CONTINUOUS_TOGGLE", "EXPLAIN", "INTERPRET_SCREEN",
+                   "START_CAPTURE", "START_RETAINING", "STOP_CAPTURE", "STOP_RETAINING",
+                   "TOGGLE_CAPTURE", "TOGGLE_CONTINUOUS", "TOGGLE_RETENTION", "TRANSCRIPT"]
 
 stub_helper = """#!/bin/sh
 output=""
@@ -121,6 +135,27 @@ class RegisteredCommandsTest(AssistantCommandTestCase):
     def test_every_command_up_to_phase_3_is_registered(self):
         self.assertEqual(expected_commands, self.assistant._dispatcher.command_names())
 
+    def test_every_command_carries_its_documented_shortcut(self):
+        help_by_name = {name: shortcut
+                        for shortcut, name, _description
+                        in self.assistant._dispatcher.command_help()}
+        self.assertEqual(expected_shortcuts, help_by_name)
+
+    def test_a_shortcut_runs_its_command_and_forwards_arguments(self):
+        self.add_speech("the lease timeout was thirty seconds")
+        reply = self.dispatch("C 30")
+        self.assertTrue(reply.startswith("OK "), reply)
+        self.assertIn("30", reply)
+
+    def test_the_formerly_supported_command_names_are_rejected(self):
+        for old_name in former_commands:
+            self.assertTrue(self.dispatch(old_name).startswith("FAIL "), old_name)
+            self.assertIn("unknown command", self.dispatch(old_name), old_name)
+
+    def test_canonical_names_in_lower_case_are_rejected(self):
+        self.assertTrue(self.dispatch("status").startswith("FAIL "))
+        self.assertTrue(self.dispatch("explain_speech").startswith("FAIL "))
+
 
 class StatusFieldsTest(AssistantCommandTestCase):
     """The menu bar polls the session state several times a minute and cannot read
@@ -143,7 +178,7 @@ class StatusFieldsTest(AssistantCommandTestCase):
         self.assertEqual("system", self.fields()["streams"])
 
     def test_retention_and_the_utterance_count_follow_the_session(self):
-        self.dispatch("START_RETAINING")
+        self.dispatch("TRANSCRIPT_START")
         self.add_speech("one utterance")
         fields = self.fields()
         self.assertEqual("retained", fields["retention"])
@@ -162,7 +197,7 @@ class StatusFieldsTest(AssistantCommandTestCase):
         self.assertTrue(self.dispatch("STATUS_FIELDS").startswith("FAIL "))
 
     def test_the_prose_status_still_describes_the_same_session(self):
-        self.dispatch("START_RETAINING")
+        self.dispatch("TRANSCRIPT_START")
         reply = self.dispatch("STATUS")
         self.assertIn("retained", reply)
         self.assertIn("continuous: off", reply)
@@ -173,21 +208,21 @@ class TranscriptCommandTest(AssistantCommandTestCase):
 
     def test_the_recent_speech_is_returned_under_a_heading(self):
         self.add_speech("the lease timeout was thirty seconds")
-        reply = self.dispatch("TRANSCRIPT")
+        reply = self.dispatch("TRANSCRIPT_SHOW")
         heading, body = reply.split("\n", 1)
         self.assertTrue(heading.startswith("OK "), reply)
         self.assertIn("lease timeout", body)
 
     def test_an_explicit_window_length_is_honoured(self):
         self.add_speech("said a moment ago")
-        self.assertIn("said a moment ago", self.dispatch("TRANSCRIPT 300"))
+        self.assertIn("said a moment ago", self.dispatch("TRANSCRIPT_SHOW 300"))
 
     def test_a_silent_session_says_so_instead_of_returning_nothing(self):
-        self.assertIn("nothing has been transcribed", self.dispatch("TRANSCRIPT"))
+        self.assertIn("nothing has been transcribed", self.dispatch("TRANSCRIPT_SHOW"))
 
     def test_speech_older_than_the_window_is_not_returned(self):
         self.add_speech("recent")
-        self.assertNotIn("recent", self.dispatch("TRANSCRIPT 0"))
+        self.assertNotIn("recent", self.dispatch("TRANSCRIPT_SHOW 0"))
 
 
 class AnswerCommandTest(AssistantCommandTestCase):
@@ -198,7 +233,7 @@ class AnswerCommandTest(AssistantCommandTestCase):
 
     def test_the_answer_to_the_last_question_is_returned_with_its_heading(self):
         self.add_speech("the lease timeout was thirty seconds")
-        self.dispatch("EXPLAIN")
+        self.dispatch("EXPLAIN_SPEECH")
         self.wait_for_one_answer()
         reply = self.wait_for_the_answer_to_be_complete()
         self.assertIn("explanation", reply)
@@ -276,7 +311,7 @@ class TranscriptRetentionTest(AssistantCommandTestCase):
         self.assertEqual([], self.archived_files())
 
     def test_retaining_writes_the_speech_that_follows_it(self):
-        self.assertTrue(self.dispatch("START_RETAINING").startswith("OK "))
+        self.assertTrue(self.dispatch("TRANSCRIPT_START").startswith("OK "))
         self.add_speech("the lease timeout was thirty seconds")
         self.assertIn("lease timeout", self.transcript_text())
 
@@ -284,36 +319,36 @@ class TranscriptRetentionTest(AssistantCommandTestCase):
         """What was said while the session was ephemeral was said in confidence,
         so switching retention on is not retrospective."""
         self.add_speech("said while nobody was keeping it")
-        self.dispatch("START_RETAINING")
+        self.dispatch("TRANSCRIPT_START")
         self.add_speech("said afterwards")
         transcript = self.transcript_text()
         self.assertNotIn("nobody was keeping it", transcript)
         self.assertIn("said afterwards", transcript)
 
     def test_status_reports_a_retained_session_and_where_it_is_kept(self):
-        self.dispatch("START_RETAINING")
+        self.dispatch("TRANSCRIPT_START")
         self.add_speech("one utterance")
         reply = self.dispatch("STATUS")
         self.assertIn("retained", reply)
         self.assertIn(str(self.assistant._archive.directory), reply)
 
     def test_stopping_leaves_what_was_written_and_keeps_nothing_new(self):
-        self.dispatch("START_RETAINING")
+        self.dispatch("TRANSCRIPT_START")
         self.add_speech("kept")
-        self.dispatch("STOP_RETAINING")
+        self.dispatch("TRANSCRIPT_STOP")
         self.add_speech("not kept")
         transcript = self.transcript_text()
         self.assertIn("kept", transcript)
         self.assertNotIn("not kept", transcript)
 
     def test_the_toggle_turns_retention_on_and_off_again(self):
-        self.dispatch("TOGGLE_RETENTION")
+        self.dispatch("TRANSCRIPT_TOGGLE")
         self.assertTrue(self.assistant._archive.is_retaining)
-        self.dispatch("TOGGLE_RETENTION")
+        self.dispatch("TRANSCRIPT_TOGGLE")
         self.assertFalse(self.assistant._archive.is_retaining)
 
     def test_ending_a_retained_session_renders_the_markdown(self):
-        self.dispatch("START_RETAINING")
+        self.dispatch("TRANSCRIPT_START")
         self.add_speech("the lease timeout was thirty seconds")
         self.assistant._finish_the_meeting_archive()
         self.assertIn("lease timeout",
@@ -322,7 +357,7 @@ class TranscriptRetentionTest(AssistantCommandTestCase):
     def test_a_screenshot_is_archived_beside_the_transcript(self):
         """Same directory, both timestamped: that is the whole association."""
         self.install_stub_capture_helper()
-        self.dispatch("START_RETAINING")
+        self.dispatch("TRANSCRIPT_START")
         self.add_speech("look at this")
         self.dispatch("SCREENSHOT")
         images = sorted(config.archive_dir.rglob("*.png"))
@@ -361,17 +396,17 @@ class ClarifyCommandTest(AssistantCommandTestCase):
 
     def test_clarify_sends_the_recent_transcript_to_the_model(self):
         self.add_speech("the lease timeout was thirty seconds")
-        self.assertTrue(self.dispatch("CLARIFY").startswith("OK "))
+        self.assertTrue(self.dispatch("CLARIFY_SPEECH").startswith("OK "))
         requests = self.wait_for_one_answer()
         self.assertEqual(1, len(requests))
         self.assertIn("lease timeout", requests[0][1]["content"])
 
     def test_clarify_accepts_an_explicit_window_length(self):
         self.add_speech("the lease timeout was thirty seconds")
-        self.assertIn("30", self.dispatch("CLARIFY 30"))
+        self.assertIn("30", self.dispatch("CLARIFY_SPEECH 30"))
 
     def test_clarify_without_speech_fails_instead_of_asking_the_model(self):
-        self.assertTrue(self.dispatch("CLARIFY").startswith("FAIL "))
+        self.assertTrue(self.dispatch("CLARIFY_SPEECH").startswith("FAIL "))
         self.assertEqual([], self.llm.requests)
 
 
@@ -401,14 +436,14 @@ class InterpretScreenCommandTest(AssistantCommandTestCase):
     def test_interpretation_saves_the_image_and_asks_the_vision_model(self):
         self.install_stub_capture_helper()
         self.add_speech("look at the diagram on the left")
-        self.assertTrue(self.dispatch("INTERPRET_SCREEN").startswith("OK "))
+        self.assertTrue(self.dispatch("SCREEN_VISION").startswith("OK "))
         requests = self.wait_for_one_answer()
         parts = requests[0][1]["content"]
         self.assertTrue(any(part["type"] == "image_url" for part in parts))
 
     def test_interpretation_works_without_any_transcript(self):
         self.install_stub_capture_helper()
-        self.assertTrue(self.dispatch("INTERPRET_SCREEN").startswith("OK "))
+        self.assertTrue(self.dispatch("SCREEN_VISION").startswith("OK "))
         self.assertEqual(1, len(self.wait_for_one_answer()))
 
 
@@ -424,17 +459,17 @@ class InterpretWithoutAVisionModelTest(AssistantCommandTestCase):
         self.install_stub_capture_helper()
 
     def test_the_image_is_still_archived_when_nothing_can_interpret_it(self):
-        reply = self.dispatch("INTERPRET_SCREEN")
+        reply = self.dispatch("SCREEN_VISION")
         self.assertTrue(reply.startswith("OK "), reply)
         self.assertEqual(1, len(sorted(config.archive_dir.rglob("*.png"))))
 
     def test_the_reply_says_the_screenshot_was_not_interpreted_and_why(self):
-        reply = self.dispatch("INTERPRET_SCREEN")
+        reply = self.dispatch("SCREEN_VISION")
         self.assertIn("not interpreted", reply)
         self.assertIn(config.vision_llm_model, reply)
 
     def test_no_model_is_asked_to_interpret_the_image(self):
-        self.dispatch("INTERPRET_SCREEN")
+        self.dispatch("SCREEN_VISION")
         time.sleep(0.2)
         self.assertEqual([], self.llm.requests)
 

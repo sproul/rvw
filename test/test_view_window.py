@@ -116,7 +116,7 @@ class ViewerAgainstAnAssistantTest(unittest.TestCase):
         self.addCleanup(assistant.stop)
         self.start_viewer("transcript")
         self.wait_until(lambda: assistant.commands)
-        self.assertEqual("TRANSCRIPT", assistant.commands[0])
+        self.assertEqual("TRANSCRIPT_SHOW", assistant.commands[0])
 
     def test_the_answer_window_polls_the_answer(self):
         assistant = StandInAssistant(self.socket_path, "OK explanation (complete):\nan answer\n")
