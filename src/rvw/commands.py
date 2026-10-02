@@ -64,6 +64,10 @@ class CommandDispatcher:
                                                             ", ".join(self.command_names()))
         return self._run_handler(canonical, words[1:])
 
+    def recognises(self, word):
+        """Whether `word` is a registered command name or shortcut, case sensitively."""
+        return self._canonical_name(word) is not None
+
     def _canonical_name(self, word):
         if word in self._handlers:
             return word

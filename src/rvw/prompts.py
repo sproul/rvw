@@ -75,7 +75,7 @@ interpret_system_prompt = (
     "Answer in compact prose or short bullets."
 )
 
-code_review_system_prompt = """Given a software task, source (including tests and possibly a transcript of how the software was tested) and patch, search the patch for defects.
+code_review_system_prompt = """Given a software task, source (including tests and possibly a transcript of how the software was tested) and patch, search the patch for defects. Note that this information will come in the form of screenshots (which may have been subject to OCR), so there could be overlap or gaps or odd formatting.
 
 Read the task as a contract, closely. The patch quality is judged according to the task as written, including every constraint in it: files not to touch, tests that must keep passing, what to do if the request can't be met. A patch is valid only if it works in general, not just for an example in the task. E.g., an issue asking a date parser to accept a second format which includes one sample date: a patch that special-cases that one string would not be considered a valid general patch, even if the tests are green. Decide what a correct patch must do before judging the attempt.
 
@@ -91,13 +91,13 @@ The defect types are
         - minor: style
 These are in priority order. If several apply, pick the first.
 
-Review against the spec, not your taste. An issue is a place where the diff gets a requirement of RFP.md wrong or does something it forbids. The RFP is a short numbered list of requirements plus an "Out of scope" section. Read it first and note what each requirement demands.
+Review against the spec, not your taste. An issue is a place where the diff gets a requirement of the task (sometimes expressed by the contents of RFP.md) wrong or does something it forbids. The task or RFP is a short numbered list of requirements plus an "Out of scope" section. Read it first and note what each requirement demands.
 
-Then go through each changed file on the after side, hunk by hunk, asking which requirement each hunk serves. Some code that looks suspicious is actually fine under the RFP; these look-alikes are planted, so check the RFP before you mark anything. An example would be an RFP that says existing settings must be preserved, and a diff that rewrites the settings file unconditionally. That's a critical issue even though the happy path works.
+Then go through each changed file on the after side, hunk by hunk, asking which requirement each hunk serves. Some code that looks suspicious is actually fine under the task/RFP; these look-alikes are planted, so check the task/RFP before you mark anything. An example would be a task/RFP that says existing settings must be preserved, and a diff that rewrites the settings file unconditionally. That's a critical issue even though the happy path works.
 
 Check the paths nobody demos. Most issues aren't on the main path. Look at error handling and missing values, unusual inputs, configuration combinations, state shared across requests or threads, data the user already had, and anything that touches secrets or permissions. Use the brief's severity definitions.
 
-Mark precisely, and explain every mark. Select only the lines that are wrong (only the first 6 selected lines count). If the same bug appears in several places, note the other instances in a single issue writeup. Any issue should note the test, hunk, transcript step or RFP clause that exposes the problem.
+Mark precisely, and explain every mark. Select only the lines that are wrong (only the first 6 selected lines count). If the same bug appears in several places, note the other instances in a single issue writeup. Any issue should note the test, hunk, transcript step or task/RFP clause that exposes the problem.
 
 For each issue include a confidence level from 0 to 100.
 """

@@ -16,6 +16,11 @@ log = logging.getLogger(__name__)
 
 max_command_bytes = 4096
 
+# Commands polled on a timer (the menu bar's STATUS_FIELDS every few seconds), which
+# would otherwise bury every command a person sent under one repeated line. Only
+# their successes go unlogged: a poll that fails is news worth seeing.
+quietly_polled_commands = frozenset({"STATUS_FIELDS"})
+
 
 class ControlSocketServer:
     """Accept one command per connection and reply with a single line."""
@@ -61,5 +66,11 @@ class ControlSocketServer:
     def _handle_connection(self, connection):
         command_line = connection.recv(max_command_bytes).decode("utf-8", "replace")
         reply = self._dispatcher.dispatch(command_line)
-        log.info("%s <- %s", reply, command_line.strip())
+        self._log_unless_a_successful_poll(command_line.strip(), reply)
         connection.sendall((reply + "\n").encode("utf-8"))
+
+    def _log_unless_a_successful_poll(self, command_line, reply):
+        """Log a served command and its reply, except a successful quiet poll."""
+        if command_line in quietly_polled_commands and reply.startswith("OK"):
+            return
+        log.info("%s <- %s", reply, command_line)

@@ -113,6 +113,16 @@ class CommandDispatcherTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.dispatcher.register("NEW", self.record_call, shortcut=blank)
 
+    # -- recognising -------------------------------------------------------
+
+    def test_a_canonical_name_and_a_shortcut_are_both_recognised(self):
+        self.assertTrue(self.dispatcher.recognises("EXPLAIN_SPEECH"))
+        self.assertTrue(self.dispatcher.recognises("E"))
+
+    def test_an_unregistered_or_differently_cased_word_is_not_recognised(self):
+        for word in ["explain_speech", "e", "WIBBLE", ""]:
+            self.assertFalse(self.dispatcher.recognises(word), word)
+
     # -- listing -----------------------------------------------------------
 
     def test_known_commands_are_the_canonical_names_only(self):

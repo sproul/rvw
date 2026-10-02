@@ -329,3 +329,33 @@ probe's verdict, and that build_app.sh does nothing when nothing changed.
 Treat a violated assumption as fatal in the test as in the code. A transcript
 line that cannot be parsed stops the rebuild; the test asserts that it stops,
 not that it is skipped.
+
+Manual code review scenarios
+----------------------------
+One machine version:
+    
+    - I close all windows but emacs (where bin/rvw is running) and keep one browser window which I use to look at a software patch.
+    
+    - on emacs in the bin/rvw buffer, I set the prompt to be code_review by entering
+                :PROMPT_SET c
+    
+    - I navigate in the browser to a page which shows information related to a code review. I use the hotkey cmd-ctrl-opt-a to add the current screen to the context.
+    
+    - I navigate in the browser to another page which also shows information related to the same code review. I use the hotkey cmd-ctrl-opt-s to add the current screen to the context and also request analysis.
+    
+    - The analysis should be displayed in bin/rvw's output.
+
+Two machine version:
+
+    - I connect the work machine HDMI output and the review machine USB input to the Elgato 4K X
+ 
+    - On the work machine I close all windows but one or two browser windows which I use to look at a software patch.
+    
+    - On the review machine I run emacs with a buffer dedicated to bin/rvw. In that buffer, I enter
+                PROMPT_SET code_review
+    
+    - On the work machine I navigate in the browser to a page which shows information related to a code review. I use the hotkey cmd-ctrl-opt-a on the review machine to add the current screen to the context.
+    
+    - Still on the work machine: I navigate in the browser to another page which also shows information related to the same code review. I use the hotkey cmd-ctrl-opt-s on the review machine to add the current screen to the context and also request analysis.
+    
+    - The analysis should be displayed in bin/rvw's output in the review machine's display.

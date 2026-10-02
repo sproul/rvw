@@ -1,7 +1,7 @@
 """Tests for the interactive console: pending context, prompt choice, submit.
 
 The console runs in the assistant's own terminal, so what is tested here is the
-line language (`s`, `S`, `c`, `C`, `pl`, `p X`, `?`, `:COMMAND`, `q`), the order
+line language (`s`, `S`, `c`, `C`, `?`, bare or `:` dispatcher commands), the order
 context items are assembled into the model request, and the rules around when
 that context is cleared: only after a submit was actually queued.
 """
@@ -244,6 +244,31 @@ class LineLanguageTest(ConsoleTestCase):
 
     def test_an_unknown_colon_command_is_a_fail_reply(self):
         self.assertTrue(self.console.handle_line(":DEFINITELY_NOT").startswith("FAIL "))
+
+    def test_a_bare_command_name_dispatches_with_its_arguments(self):
+        reply = self.console.handle_line("PROMPT_SET c")
+        self.assertTrue(reply.startswith("OK "), reply)
+        self.assertEqual("code_review", self.assistant._selected_prompt_key)
+
+    def test_a_bare_command_name_without_arguments_dispatches(self):
+        reply = self.console.handle_line("STATUS")
+        self.assertTrue(reply.startswith("OK "), reply)
+        self.assertIn("capture:", reply)
+
+    def test_a_bare_shortcut_dispatches(self):
+        reply = self.console.handle_line("t+")
+        self.assertTrue(reply.startswith("OK "), reply)
+        self.assertTrue(self.assistant._archive.is_retaining)
+
+    def test_a_console_alias_wins_over_the_dispatcher_shortcut_it_shadows(self):
+        reply = self.console.handle_line("S")
+        self.assertNotIn("capture:", reply)
+        self.assertEqual(1, len(self.captures))
+        self.assertIn("comment needs text", self.console.handle_line("c"))
+        self.assertEqual([], self.assistant._running_stream_names())
+
+    def test_a_bare_command_is_still_dispatched_case_sensitively(self):
+        self.assertTrue(self.console.handle_line("status").startswith("FAIL unknown console"))
 
     def test_q_quits_through_the_existing_quit_command(self):
         reply = self.console.handle_line("q")

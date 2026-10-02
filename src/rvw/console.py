@@ -1,6 +1,6 @@
 """The interactive console: screenshots plus typed comments, submitted together.
 
-`bin/rvw -here --source none --console` runs the assistant in this terminal and
+`bin/rvw --source none --console` runs the assistant in this terminal and
 reads one line at `rvw> `. Lower-case commands only accumulate an ordered
 context; the upper-case forms submit it to the local text model:
 
@@ -9,7 +9,9 @@ context; the upper-case forms submit it to the local text model:
     c TEXT    append TEXT as a comment
     C TEXT    the same, then submit
     pl        list the prompts; p X selects one by letter (c, e, r, u, v)
-    :COMMAND  any dispatcher command or its shortcut, e.g. :STATUS or :S
+    COMMAND   any dispatcher command or its shortcut, e.g. STATUS or PROMPT_SET c
+    :COMMAND  the same; the colon is needed only for a shortcut that one of the
+              lines above shadows, e.g. :S is STATUS while S is a screenshot
     ?         this list plus every dispatcher command and its shortcut
     q         quit
 
@@ -101,7 +103,12 @@ class Console:
     # -- one line ----------------------------------------------------------
 
     def handle_line(self, line):
-        """Act on one console line and return the reply text ('' says nothing)."""
+        """Act on one console line and return the reply text ('' says nothing).
+
+        The console's own lines are tried first, so `s`, `S`, `c` and `C` keep
+        their console meaning over the dispatcher shortcuts they shadow; any
+        other line whose first word the dispatcher recognises goes to it as is.
+        """
         line = line.strip()
         if not line:
             return ""
@@ -113,18 +120,14 @@ class Console:
             return self._comment(line[1:], submit=False)
         if line.startswith("C ") or line == "C":
             return self._comment(line[1:], submit=True)
-        if line == "pl":
-            return self._assistant._dispatcher.dispatch("PROMPT_LIST")
         if line == "send":
             return self._submit()
-        if line.split()[0] == "p":
-            return self._assistant._dispatcher.dispatch(line)
         if line == "?":
             return self._help()
         if line.startswith(":"):
             return self._assistant._dispatcher.dispatch(line[1:])
-        if line == "q":
-            return self._assistant._dispatcher.dispatch("QUIT")
+        if self._assistant._dispatcher.recognises(line.split()[0]):
+            return self._assistant._dispatcher.dispatch(line)
         return "FAIL unknown console line %r; '?' lists what works" % line
 
     # -- accumulating context ----------------------------------------------
@@ -305,7 +308,8 @@ class Console:
             "c TEXT / C TEXT  queue a comment / queue and submit",
             "pl list prompts; p X select prompt X (one letter: c e r u v)",
             "send  submit the queued context as it is",
-            ":CMD run a dispatcher command or its shortcut, e.g. :STATUS :S",
+            "CMD  run a dispatcher command or its shortcut, e.g. STATUS, PROMPT_SET c",
+            ":CMD the same; needed only where a line above shadows a shortcut, e.g. :S",
             "?  this list",
             "q  quit",
         ]
