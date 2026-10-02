@@ -47,7 +47,7 @@
   ml, m, l, pl, p, S, F, q)
   (`SEARCH <words>` and `RECALL <question>` take free text, e.g. `bin/rvwctl RECALL what did they say about reconnect behavior`)
 - Show one window by hand: `bin/rvw_view --window transcript|answer [--seconds 300]`; the
-  menu bar and alt-cmd-W / ctrl-alt-cmd-W do the same thing
+  the menu bar does the same thing, and alt-cmd-W for the transcript window
 - Take one screenshot by hand: `bin/screen_capture --output /tmp/shot.png --target frontmost`
 
 ## Notes

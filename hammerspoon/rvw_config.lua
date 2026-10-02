@@ -20,20 +20,20 @@ config.hotkeys = {
    description = "ungarble what was just said"},
   {mods = {"alt", "cmd"}, key = "s", command = "SCREEN_SAVE", silent = true,
    description = "screenshot, save only"},
-  {mods = {"ctrl", "alt", "cmd"}, key = "s", command = "SCREEN_VISION", silent = true,
-   description = "screenshot, save and interpret"},
+  {mods = {"ctrl", "alt", "cmd"}, key = "s", command = "SCREEN_ANALYZE", silent = true,
+   description = "screenshot, queue and analyze"},
   -- Retention is the one command worth an alert even mid-meeting: whether this
   -- conversation is being kept is not something to be unsure about.
   {mods = {"alt", "cmd"}, key = "t", command = "TRANSCRIPT_TOGGLE",
    description = "keep or stop keeping the transcript"},
   {mods = {"alt", "cmd"}, key = "p", local_action = "toggle_presenting",
    description = "presenting: draw nothing on this screen"},
-  -- Both windows are invisible to screen capture (see rvw_windows.lua), so these
-  -- two are safe to press mid-meeting; nothing else here draws anything at all.
+  -- The window is invisible to screen capture (see rvw_windows.lua), so this is
+  -- safe to press mid-meeting; nothing else here draws anything at all.
   {mods = {"alt", "cmd"}, key = "w", local_action = "toggle_transcript_window",
    description = "show or hide the rolling transcript window"},
-  {mods = {"ctrl", "alt", "cmd"}, key = "a", local_action = "toggle_answer_window",
-   description = "show or hide the answer window"},
+  {mods = {"ctrl", "alt", "cmd"}, key = "a", command = "SCREEN_ADD", silent = true,
+   description = "screenshot, queue for the next analysis"},
 }
 
 -- The menu items below the capture and retention state. Anything reached by a

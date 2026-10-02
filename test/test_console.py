@@ -88,7 +88,16 @@ class ConsoleTestCase(unittest.TestCase):
         config.console_capture_delay_seconds = self.saved_delay
         config.auto_hide_console = self.saved_auto_hide
         config.selected_prompt_path = self.saved_selected_prompt_path
+        self.wait_for_any_answer_thread_to_finish()
         self.temporary_directory.cleanup()
+
+    def wait_for_any_answer_thread_to_finish(self):
+        """An answer thread outlives the request the test checked and keeps
+        writing under the temporary directory; removing it underneath that
+        thread fails with 'Directory not empty'."""
+        self.assertTrue(self.assistant._answering.acquire(timeout=5.0),
+                        "an answer thread was still running after 5s")
+        self.assistant._answering.release()
 
     def _capture(self, session_epoch, target=None, exclude_window_id=None):
         shot = fake_screenshot("shot_%d.png" % (len(self.captures) + 1))

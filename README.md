@@ -248,7 +248,8 @@ vision model are loaded. It is then listening for commands.
 | alt-cmd-E | `EXPLAIN_SPEECH` | explain the last 60 s |
 | alt-cmd-C | `UNGARBLE_SPEECH` | reconstruct the words of the last 45 s |
 | alt-cmd-S | `SCREEN_SAVE` | archive the frontmost window; silent on success |
-| ctrl-alt-cmd-S | `SCREEN_VISION` | the same save, then a private interpretation |
+| ctrl-alt-cmd-A | `SCREEN_ADD` | the same save, OCRed and queued for the next analysis |
+| ctrl-alt-cmd-S | `SCREEN_ANALYZE` | the same queueing, then submits everything pending |
 | alt-cmd-T | `TRANSCRIPT_TOGGLE` | start or stop keeping this transcript |
 
 ### Commands

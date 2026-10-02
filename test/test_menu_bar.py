@@ -110,12 +110,15 @@ class HotkeyConfigTest(lua_testing.PureLuaTestCase):
             return "none"
             """ % action)
 
-    def test_the_answer_window_is_bound_to_ctrl_alt_cmd_a(self):
-        """ctrl-alt-cmd-W is export_LLM_chat's (save the Windsurf chat), so the
-        answer window took A instead."""
-        self.assertIn("toggle_answer_window", self.hotkey_actions())
-        self.assertEqual("ctrl+alt+cmd+a",
-                         self.combo_for_action("toggle_answer_window"))
+    def test_screen_add_is_bound_to_ctrl_alt_cmd_a(self):
+        self.assertEqual("ctrl+alt+cmd+a", self.combo_for_action("SCREEN_ADD"))
+
+    def test_screen_analyze_is_bound_to_ctrl_alt_cmd_s(self):
+        self.assertEqual("ctrl+alt+cmd+s", self.combo_for_action("SCREEN_ANALYZE"))
+
+    def test_the_answer_window_is_reached_from_the_menu_not_a_hotkey(self):
+        """ctrl-alt-cmd-A went to SCREEN_ADD; the menu still toggles the window."""
+        self.assertNotIn("toggle_answer_window", self.hotkey_actions())
 
     def test_the_transcript_window_keeps_alt_cmd_w(self):
         self.assertIn("toggle_transcript_window", self.hotkey_actions())
