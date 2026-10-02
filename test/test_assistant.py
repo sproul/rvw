@@ -3,11 +3,12 @@
 Capture, recognition and the LLM are exercised elsewhere or need real hardware;
 what matters here is that every hotkey command exists, that the answering
 commands refuse to run on an empty transcript instead of asking the model
-nonsense, and that SCREENSHOT reports where the image went.
+nonsense, and that SCREEN_SAVE reports where the image went.
 """
 
 import stat
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -21,7 +22,8 @@ from rvw.transcript import TranscriptSegment
 expected_commands = ["ANSWER", "AUDIO_CAPTURE_START", "AUDIO_CAPTURE_STOP",
                      "AUDIO_CAPTURE_TOGGLE", "EXPLAIN_SPEECH", "MODELS",
                      "PROMPT_LIST", "PROMPT_SET",
-                     "QUIT", "RECALL", "REINDEX", "SCREENSHOT", "SCREEN_VISION", "SEARCH",
+                     "QUIT", "RECALL", "REINDEX", "SCREEN_ADD", "SCREEN_ANALYZE",
+                     "SCREEN_SAVE", "SCREEN_VISION", "SEARCH",
                      "SET_LANGUAGE", "SET_MODEL", "STATUS", "STATUS_FIELDS",
                      "TRANSCRIPT_SHOW", "TRANSCRIPT_START", "TRANSCRIPT_STOP",
                      "TRANSCRIPT_TOGGLE", "UNGARBLE_SPEECH"]
@@ -30,15 +32,17 @@ expected_shortcuts = {"ANSWER": "A", "AUDIO_CAPTURE_START": "c+",
                       "AUDIO_CAPTURE_STOP": "c-", "AUDIO_CAPTURE_TOGGLE": "c",
                       "EXPLAIN_SPEECH": "E", "MODELS": "ml",
                       "PROMPT_LIST": "pl", "PROMPT_SET": "p",
-                      "QUIT": "q", "RECALL": "r", "REINDEX": "R", "SCREENSHOT": "s",
-                      "SCREEN_VISION": "V", "SEARCH": "f", "SET_LANGUAGE": "l",
+                      "QUIT": "q", "RECALL": "r", "REINDEX": "R",
+                      "SCREEN_ADD": "sa", "SCREEN_ANALYZE": "sx",
+                      "SCREEN_SAVE": "s", "SCREEN_VISION": "V", "SEARCH": "f",
+                      "SET_LANGUAGE": "l",
                       "SET_MODEL": "m", "STATUS": "S", "STATUS_FIELDS": "F",
                       "TRANSCRIPT_SHOW": "T", "TRANSCRIPT_START": "t+",
                       "TRANSCRIPT_STOP": "t-", "TRANSCRIPT_TOGGLE": "t",
                       "UNGARBLE_SPEECH": "C"}
 
 former_commands = ["CLARIFY", "CLARIFY_SPEECH", "CONTINUOUS_TOGGLE", "EXPLAIN",
-                   "INTERPRET_SCREEN",
+                   "INTERPRET_SCREEN", "SCREENSHOT",
                    "START_CAPTURE", "START_RETAINING", "STOP_CAPTURE", "STOP_RETAINING",
                    "TOGGLE_CAPTURE", "TOGGLE_CONTINUOUS", "TOGGLE_RETENTION", "TRANSCRIPT"]
 
@@ -73,6 +77,23 @@ class RecordingLlm:
         if self.raise_on_available_models:
             raise LocalLlmError("no local LLM at %s (refused)" % config.llm_base_url)
         return self.served_models
+
+
+class BlockingRecordingLlm(RecordingLlm):
+    """stream_chat holds the answer open until the test releases it, so a test
+    can see what a command does while an answer is still streaming."""
+
+    def __init__(self):
+        super().__init__()
+        self.release = threading.Event()
+        self.finished = threading.Event()
+
+    def stream_chat(self, messages, on_token, on_reasoning=None):
+        self.requests.append(messages)
+        self.release.wait(5)
+        self.finished.set()
+        on_token("stub answer")
+        return "stub answer"
 
 
 class AssistantCommandTestCase(unittest.TestCase):
@@ -367,7 +388,7 @@ class TranscriptRetentionTest(AssistantCommandTestCase):
         self.install_stub_capture_helper()
         self.dispatch("TRANSCRIPT_START")
         self.add_speech("look at this")
-        self.dispatch("SCREENSHOT")
+        self.dispatch("SCREEN_SAVE")
         images = sorted(config.archive_dir.rglob("*.png"))
         self.assertEqual(self.assistant._archive.directory, images[0].parent.parent)
 
@@ -425,25 +446,137 @@ class UngarbleCommandTest(AssistantCommandTestCase):
         self.assertEqual([], self.llm.requests)
 
 
-class ScreenshotCommandTest(AssistantCommandTestCase):
+class ScreenSaveCommandTest(AssistantCommandTestCase):
 
-    def test_screenshot_saves_an_image_and_reports_its_path(self):
+    def test_screen_save_saves_an_image_and_reports_its_path(self):
         self.install_stub_capture_helper()
-        reply = self.dispatch("SCREENSHOT")
+        reply = self.dispatch("SCREEN_SAVE")
         self.assertTrue(reply.startswith("OK "), reply)
         saved = sorted(config.archive_dir.rglob("*.png"))
         self.assertEqual(1, len(saved))
         self.assertIn(saved[0].name, reply)
 
-    def test_screenshot_never_calls_a_model(self):
+    def test_screen_save_never_calls_a_model(self):
         self.install_stub_capture_helper()
-        self.dispatch("SCREENSHOT")
+        self.dispatch("SCREEN_SAVE")
         time.sleep(0.2)
         self.assertEqual([], self.llm.requests)
 
     def test_a_capture_failure_is_reported_as_a_failure(self):
         config.screen_capture_helper_path = self.root / "not_built"
-        self.assertTrue(self.dispatch("SCREENSHOT").startswith("FAIL "))
+        self.assertTrue(self.dispatch("SCREEN_SAVE").startswith("FAIL "))
+
+
+class ScreenContextCommandTest(AssistantCommandTestCase):
+    """SCREEN_ADD archives a shot, OCRs it and queues the text in the one
+    pending context the console also writes to; SCREEN_ANALYZE does the same
+    and then submits all of it under the selected prompt. Neither goes near
+    the vision model, and the image is archived whether or not OCR succeeds."""
+
+    def setUp(self):
+        super().setUp()
+        self.install_stub_capture_helper()
+        self.ocr_calls = []
+        self.ocr_error = None
+        self.ocr_text = None
+        patcher = patch("rvw.ocr.ocr_text_of", side_effect=self._ocr)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _ocr(self, image_path):
+        self.ocr_calls.append(image_path)
+        if self.ocr_error is not None:
+            raise self.ocr_error
+        return self.ocr_text or "ocr text of %s" % image_path.name
+
+    def pending(self):
+        return self.assistant._console.pending
+
+    def test_screen_save_archives_without_ocr_or_a_pending_item(self):
+        self.assertTrue(self.dispatch("SCREEN_SAVE").startswith("OK "))
+        self.assertEqual(1, len(sorted(config.archive_dir.rglob("*.png"))))
+        self.assertEqual([], self.ocr_calls)
+        self.assertEqual([], self.pending())
+        time.sleep(0.2)
+        self.assertEqual([], self.llm.requests)
+
+    def test_screen_add_archives_ocrs_and_queues_without_asking_a_model(self):
+        reply = self.dispatch("SCREEN_ADD")
+        self.assertTrue(reply.startswith("OK "), reply)
+        self.assertIn("queued", reply)
+        self.assertEqual(1, len(sorted(config.archive_dir.rglob("*.png"))))
+        self.assertEqual(1, len(self.ocr_calls))
+        self.assertEqual(1, len(self.pending()))
+        self.assertEqual("screenshot", self.pending()[0].kind)
+        time.sleep(0.2)
+        self.assertEqual([], self.llm.requests)
+
+    def test_the_sa_shortcut_adds_a_shot(self):
+        self.assertTrue(self.dispatch("sa").startswith("OK "))
+        self.assertEqual(1, len(self.pending()))
+
+    def test_analyze_submits_prior_shots_and_the_current_one_in_order(self):
+        self.dispatch("SCREEN_ADD")
+        self.dispatch("SCREEN_ADD")
+        reply = self.dispatch("SCREEN_ANALYZE")
+        self.assertTrue(reply.startswith("OK "), reply)
+        text = self.wait_for_one_answer()[0][1]["content"]
+        positions = [text.index("Screenshot %d" % n) for n in (1, 2, 3)]
+        self.assertEqual(sorted(positions), positions)
+        self.assertEqual([], self.pending())
+
+    def test_analyze_keeps_everything_when_the_model_is_busy(self):
+        self.dispatch("SCREEN_ADD")
+        self.assistant._answering.acquire()
+        self.addCleanup(self.assistant._answering.release)
+        reply = self.dispatch("SCREEN_ANALYZE")
+        self.assertTrue(reply.startswith("FAIL "), reply)
+        self.assertIn("progress", reply)
+        self.assertEqual(2, len(self.pending()))
+        self.assertEqual([], self.llm.requests)
+
+    def test_an_ocr_failure_queues_nothing_but_keeps_the_image(self):
+        self.ocr_error = RuntimeError("unreadable")
+        reply = self.dispatch("SCREEN_ADD")
+        self.assertTrue(reply.startswith("FAIL "), reply)
+        self.assertEqual([], self.pending())
+        self.assertEqual(1, len(sorted(config.archive_dir.rglob("*.png"))))
+
+    def test_empty_ocr_queues_nothing(self):
+        self.ocr_text = "   "
+        self.assertTrue(self.dispatch("SCREEN_ADD").startswith("FAIL "))
+        self.assertEqual([], self.pending())
+
+    def test_analyze_never_asks_the_model_when_the_capture_fails(self):
+        self.dispatch("SCREEN_ADD")
+        config.screen_capture_helper_path = self.root / "not_built"
+        reply = self.dispatch("SCREEN_ANALYZE")
+        self.assertTrue(reply.startswith("FAIL "), reply)
+        self.assertEqual(1, len(self.pending()))
+        time.sleep(0.2)
+        self.assertEqual([], self.llm.requests)
+
+    def test_analyze_never_asks_the_model_when_ocr_fails(self):
+        self.ocr_error = RuntimeError("unreadable")
+        reply = self.dispatch("SCREEN_ANALYZE")
+        self.assertTrue(reply.startswith("FAIL "), reply)
+        self.assertEqual([], self.pending())
+        self.assertEqual([], self.llm.requests)
+
+    def test_analyze_returns_as_soon_as_the_answer_is_queued(self):
+        """The control socket serves commands serially; waiting for the answer
+        to finish streaming would stall STATUS and QUIT behind it, and a model
+        that has to load first makes that most of a minute."""
+        self.llm = self.assistant._llm = BlockingRecordingLlm()
+        try:
+            reply = self.dispatch("SCREEN_ANALYZE")
+            self.assertTrue(reply.startswith("OK "), reply)
+            self.assertIn("submitted", reply)
+            self.wait_for_one_answer()
+            self.assertFalse(self.llm.finished.is_set(),
+                             "the reply waited for the answer to finish")
+        finally:
+            self.llm.release.set()
 
 
 class InterpretScreenCommandTest(AssistantCommandTestCase):

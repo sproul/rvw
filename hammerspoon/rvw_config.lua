@@ -18,7 +18,7 @@ config.hotkeys = {
    description = "explain the last minute"},
   {mods = {"alt", "cmd"}, key = "c", command = "UNGARBLE_SPEECH",
    description = "ungarble what was just said"},
-  {mods = {"alt", "cmd"}, key = "s", command = "SCREENSHOT", silent = true,
+  {mods = {"alt", "cmd"}, key = "s", command = "SCREEN_SAVE", silent = true,
    description = "screenshot, save only"},
   {mods = {"ctrl", "alt", "cmd"}, key = "s", command = "SCREEN_VISION", silent = true,
    description = "screenshot, save and interpret"},
@@ -41,7 +41,9 @@ config.hotkeys = {
 config.menu_actions = {
   {title = "Explain the last minute", command = "EXPLAIN_SPEECH"},
   {title = "Ungarble what was just said", command = "UNGARBLE_SPEECH"},
-  {title = "Screenshot", command = "SCREENSHOT", silent = true},
+  {title = "Screenshot", command = "SCREEN_SAVE", silent = true},
+  {title = "Screenshot and queue", command = "SCREEN_ADD", silent = true},
+  {title = "Screenshot and analyze", command = "SCREEN_ANALYZE", silent = true},
   {title = "Screenshot and interpret", command = "SCREEN_VISION", silent = true},
   {title = "Rebuild the search index", command = "REINDEX"},
 }

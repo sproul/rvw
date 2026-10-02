@@ -16,6 +16,7 @@ from .answer_buffer import AnswerBuffer
 from .asr import WhisperTranscriber
 from .audio_source import CaptureStream
 from .commands import CommandDispatcher
+from .console import Console
 from .control import ControlSocketServer
 from .llm import LocalLlm, LocalLlmError
 from .meeting_archive import MeetingArchive
@@ -46,6 +47,10 @@ class Assistant:
         self._selected_prompt_key = prompts.read_selected_prompt_key(
             config.selected_prompt_path)
         self._answer_buffer = AnswerBuffer()
+        # One Console whether or not --console runs its read loop: the pending
+        # context the socket screen commands and the console lines share is
+        # its, so it has to exist before either of them does.
+        self._console = Console(self)
         self._dispatcher = self._build_dispatcher()
         self._control = ControlSocketServer(self._dispatcher)
         self._answering = threading.Lock()
@@ -85,12 +90,11 @@ class Assistant:
         The read loop replaced `_wait_for_quit`, which is where the periodic
         continuous analysis ticked -- a small thread runs it here instead.
         """
-        from .console import Console
         ticker = threading.Thread(target=self._console_ticks, name="rvw-console-ticks",
                                   daemon=True)
         ticker.start()
         try:
-            Console(self).run()
+            self._console.run()
         finally:
             # Whatever ended the loop -- q, EOF, an exception -- stops the
             # ticker; shutdown stays in exactly one place (here, or main's
@@ -205,11 +209,17 @@ class Assistant:
                  "answer a question from cited retained meeting passages", "r"),
                 ("REINDEX", self._command_reindex,
                  "rebuild the retained transcript search index", "R"),
+                ("SCREEN_ADD", self._command_screen_add,
+                 "archive a screenshot, OCR it and queue the text in the "
+                 "console's pending context", "sa"),
+                ("SCREEN_ANALYZE", self._command_screen_analyze,
+                 "the same, then submit the whole pending context under the "
+                 "selected prompt", "sx"),
+                ("SCREEN_SAVE", self._command_screen_save,
+                 "archive a screenshot, without OCR or a model", "s"),
                 ("SCREEN_VISION", self._command_interpret_screen,
                  "archive a screenshot and ask the vision model about it with "
                  "recent speech, if that model is served", "V"),
-                ("SCREENSHOT", self._command_screenshot,
-                 "archive a screenshot, without OCR or a model", "s"),
                 ("SEARCH", self._command_search,
                  "search retained meeting transcripts for words", "f"),
                 ("SET_LANGUAGE", self._command_set_language,
@@ -273,10 +283,29 @@ class Assistant:
         return self._start_transcript_answer(prompts.build_ungarble_messages, arguments,
                                              config.ungarble_window_seconds, "ungarbling")
 
-    def _command_screenshot(self, arguments):
+    def _command_screen_save(self, arguments):
         """Archival only: no OCR, no model, no network, nothing on screen."""
         saved = screenshot.capture_screenshot(self._session_started_epoch)
         return "screenshot saved as %s" % saved.image_path.name
+
+    def _command_screen_add(self, arguments):
+        """Archive a shot, OCR it and queue the text beside the console's items."""
+        return self._screen_capture_command(submit=False)
+
+    def _command_screen_analyze(self, arguments):
+        """The same capture and queue, then submit all of the pending context."""
+        return self._screen_capture_command(submit=True)
+
+    def _screen_capture_command(self, submit):
+        """The console's reply is already prefixed, while the dispatcher adds
+        'OK ' to whatever a handler returns -- strip the console's OK, and turn
+        its FAIL into the exception the dispatcher itself prefixes."""
+        reply = self._console.capture_and_append_for_command(submit)
+        if reply.startswith("FAIL "):
+            raise RuntimeError(reply[len("FAIL "):])
+        if reply.startswith("OK "):
+            return reply[len("OK "):]
+        return reply
 
     def _command_interpret_screen(self, arguments):
         """The same archival save, then a private interpretation in this terminal."""

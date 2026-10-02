@@ -21,6 +21,7 @@ from rvw import config, prompts, screenshot
 from rvw.assistant import Assistant, parse_arguments
 from rvw.console import Console
 from rvw.transcript import TranscriptSegment
+from test_assistant import stub_helper
 
 repo_dir = Path(__file__).resolve().parents[1]
 
@@ -39,6 +40,20 @@ class RecordingLlm:
 
     def available_models(self):
         return [config.llm_model]
+
+
+class BlockingLlm(RecordingLlm):
+    """stream_chat holds the answer open until the test releases it."""
+
+    def __init__(self):
+        super().__init__()
+        self.release = threading.Event()
+
+    def stream_chat(self, messages, on_token, on_reasoning=None):
+        self.requests.append(messages)
+        self.release.wait(5)
+        on_token("stub answer")
+        return "stub answer"
 
 
 def fake_screenshot(name="2026-08-15_23.41.07.123.png"):
@@ -199,7 +214,7 @@ class LineLanguageTest(ConsoleTestCase):
     def test_help_distinguishes_archiving_from_the_screenshot_alias(self):
         reply = self.console.handle_line("?")
         screenshot_lines = [line for line in reply.splitlines()
-                            if line.startswith(":s  SCREENSHOT  ")]
+                            if line.startswith(":s  SCREEN_SAVE  ")]
         self.assertEqual(1, len(screenshot_lines))
         self.assertIn("without", screenshot_lines[0].lower())
 
@@ -355,6 +370,78 @@ class SubmitSemanticsTest(ConsoleTestCase):
         reply = self.console.handle_line("s")
         self.assertTrue(reply.startswith("FAIL "), reply)
         self.assertEqual([], self.ocr_calls)
+
+    def test_the_reply_names_the_prompt_selected_when_the_submit_was_queued(self):
+        """The console waits out the answer; a `p` pressed while it streams must
+        not retroactively rename the prompt the request was sent under."""
+        self.llm = self.assistant._llm = BlockingLlm()
+        self.console.handle_line("c a remark")
+        replies = []
+        submitter = threading.Thread(
+            target=lambda: replies.append(self.console.handle_line("send")),
+            daemon=True)
+        submitter.start()
+        try:
+            self.wait_for_one_answer()
+            self.console.handle_line("p c")
+        finally:
+            self.llm.release.set()
+        submitter.join(timeout=5)
+        self.assertIn("under prompt explain", replies[0])
+        self.assertEqual("code_review", self.assistant._selected_prompt_key)
+        self.assertEqual(prompts.explain_system_prompt, self.request()[0]["content"])
+
+
+class SharedPendingContextTest(ConsoleTestCase):
+    """The assistant owns one Console; the socket commands SCREEN_ADD and
+    SCREEN_ANALYZE and the console's own lines all read and write its single
+    ordered pending context. The dispatcher's capture is the plain archiver --
+    no hiding, no delay -- so the stub capture helper stands in for it."""
+
+    def setUp(self):
+        super().setUp()
+        self.assistant._console = self.console
+        path = self.root / "screen_capture"
+        path.write_text(stub_helper, encoding="utf-8")
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+        self.saved_helper_path = config.screen_capture_helper_path
+        config.screen_capture_helper_path = path
+        self.addCleanup(self._restore_helper_path)
+
+    def _restore_helper_path(self):
+        config.screen_capture_helper_path = self.saved_helper_path
+
+    def dispatch(self, command_line):
+        return self.assistant._dispatcher.dispatch(command_line)
+
+    def test_a_console_s_and_a_dispatcher_add_share_one_context(self):
+        self.console.handle_line("s")
+        reply = self.dispatch("SCREEN_ADD")
+        self.assertTrue(reply.startswith("OK "), reply)
+        self.assertEqual(["screenshot", "screenshot"],
+                         [item.kind for item in self.console.pending])
+        self.assertEqual(2, len(self.ocr_calls))
+        self.assertEqual(1, len(sorted(config.archive_dir.rglob("*.png"))),
+                         "the dispatcher's shot is archived even though the "
+                         "console's injected capture seam was bypassed")
+
+    def test_screen_analyze_submits_the_shared_context_in_order(self):
+        self.console.handle_line("s")
+        self.console.handle_line("c a remark")
+        reply = self.dispatch("SCREEN_ANALYZE")
+        self.assertTrue(reply.startswith("OK "), reply)
+        text = self.user_text()
+        positions = [text.index(marker)
+                     for marker in ("Screenshot 1", "Comment 1", "Screenshot 2")]
+        self.assertEqual(sorted(positions), positions)
+        self.assertEqual([], self.console.pending)
+
+    def test_console_send_submits_what_the_dispatcher_added(self):
+        self.assertTrue(self.dispatch("SCREEN_ADD").startswith("OK "))
+        reply = self.console.handle_line("send")
+        self.assertTrue(reply.startswith("OK "), reply)
+        self.assertEqual(1, len(self.wait_for_one_answer()))
+        self.assertEqual([], self.console.pending)
 
 
 class AssistantInitTestCase(unittest.TestCase):

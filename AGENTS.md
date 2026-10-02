@@ -42,8 +42,8 @@
 - Run the tests: `util/run_tests.sh` (unittest, no pytest in the venv)
 - Run the assistant: `bin/rvw [--source mic|system|both] [--listen] [--debug]`, which starts it
   inside `bin/rvw.app`; `bin/rvw -here ...` runs it in this terminal instead
-- Send a command: `bin/rvwctl EXPLAIN_SPEECH|UNGARBLE_SPEECH|SCREENSHOT|SCREEN_VISION|SEARCH|RECALL|REINDEX|AUDIO_CAPTURE_TOGGLE|AUDIO_CAPTURE_START|AUDIO_CAPTURE_STOP|TRANSCRIPT_START|TRANSCRIPT_STOP|TRANSCRIPT_TOGGLE|TRANSCRIPT_SHOW|ANSWER|MODELS|SET_MODEL|SET_LANGUAGE|PROMPT_LIST|PROMPT_SET|STATUS|STATUS_FIELDS|QUIT`,
-  or each command's case-sensitive shortcut (E, C, s, V, f, r, R, c, c+, c-, t+, t-, t, T, A,
+- Send a command: `bin/rvwctl EXPLAIN_SPEECH|UNGARBLE_SPEECH|SCREEN_SAVE|SCREEN_ADD|SCREEN_ANALYZE|SCREEN_VISION|SEARCH|RECALL|REINDEX|AUDIO_CAPTURE_TOGGLE|AUDIO_CAPTURE_START|AUDIO_CAPTURE_STOP|TRANSCRIPT_START|TRANSCRIPT_STOP|TRANSCRIPT_TOGGLE|TRANSCRIPT_SHOW|ANSWER|MODELS|SET_MODEL|SET_LANGUAGE|PROMPT_LIST|PROMPT_SET|STATUS|STATUS_FIELDS|QUIT`,
+  or each command's case-sensitive shortcut (E, C, s, sa, sx, V, f, r, R, c, c+, c-, t+, t-, t, T, A,
   ml, m, l, pl, p, S, F, q)
   (`SEARCH <words>` and `RECALL <question>` take free text, e.g. `bin/rvwctl RECALL what did they say about reconnect behavior`)
 - Show one window by hand: `bin/rvw_view --window transcript|answer [--seconds 300]`; the
@@ -108,6 +108,13 @@
   so its prompt was tightened to a decisive, fixed three-part format ("do not think out loud, do
   not weigh options, do not reconsider"), verified terse over five runs on m3 (0.7-1.6s each).
   Keep that discipline in any new prompt built for this model.
+- `SCREEN_ADD` (`sa`) and `SCREEN_ANALYZE` (`sx`) archive a screenshot, OCR it and
+  put the text on the one ordered pending context the console's `s`/`S`/`c`/`C`
+  lines also fill; `SCREEN_ANALYZE` then submits all of it under the selected
+  prompt and clears only once the request was accepted. One `Console` created in
+  `Assistant.__init__` owns that context, so it works with or without `--console`;
+  `_pending_lock` guards it because the control-socket thread and the console
+  read loop both write it. `SCREEN_VISION` stays the independent vision flow.
 - `SCREEN_VISION` needs a vision model loaded as `meeting-vision`; override with
   `RVW_VLM_MODEL`. Everything else works without it. Without one it archives the image
   and replies `not interpreted: no model is loaded as 'meeting-vision'`.

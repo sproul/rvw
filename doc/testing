@@ -175,7 +175,7 @@ assistant - test_assistant.py, 32 tests
   Command wiring and the states the commands leave behind, not the quality of an
   answer: every command up to Phase 3 is registered; an ephemeral session says
   so and never writes the speech it hears; retention writes what follows it and
-  not what preceded it; SCREENSHOT reports where the image went and calls no
+  not what preceded it; SCREEN_SAVE reports where the image went and calls no
   model at all; INTERPRET_SCREEN still reports the archived image when no vision
   model is loaded, and asks no other model to stand in for it; UNGARBLE without
   speech fails instead of asking the model nonsense; SEARCH and RECALL refuse an

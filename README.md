@@ -40,7 +40,7 @@ of text to a local LLM and streams the explanation back to the assistant's termi
 
 **Phase 2, making it usable.** `UNGARBLE_SPEECH`, a second, shorter transcript command whose
 prompt asks what words were actually said rather than what they meant - the answer to
-a strong accent or a bad recognition. `SCREENSHOT`, an archival-only capture of the
+a strong accent or a bad recognition. `SCREEN_SAVE`, an archival-only capture of the
 frontmost window with its metadata, silent on success so that nothing appears in a
 shared screen. `SCREEN_VISION`, the identical save followed by a private
 interpretation from a local vision model.
@@ -247,7 +247,7 @@ vision model are loaded. It is then listening for commands.
 | alt-cmd-R | `AUDIO_CAPTURE_TOGGLE` | start or stop capturing |
 | alt-cmd-E | `EXPLAIN_SPEECH` | explain the last 60 s |
 | alt-cmd-C | `UNGARBLE_SPEECH` | reconstruct the words of the last 45 s |
-| alt-cmd-S | `SCREENSHOT` | archive the frontmost window; silent on success |
+| alt-cmd-S | `SCREEN_SAVE` | archive the frontmost window; silent on success |
 | ctrl-alt-cmd-S | `SCREEN_VISION` | the same save, then a private interpretation |
 | alt-cmd-T | `TRANSCRIPT_TOGGLE` | start or stop keeping this transcript |
 
@@ -260,7 +260,9 @@ Every command also answers to a short case-sensitive alias, shown after the `#`:
 ```bash
 bin/rvwctl EXPLAIN_SPEECH [seconds]        # E
 bin/rvwctl UNGARBLE_SPEECH [seconds]        # C
-bin/rvwctl SCREENSHOT                      # s
+bin/rvwctl SCREEN_SAVE                     # s
+bin/rvwctl SCREEN_ADD                      # sa
+bin/rvwctl SCREEN_ANALYZE                  # sx
 bin/rvwctl SCREEN_VISION [seconds]         # V
 bin/rvwctl SEARCH <words>                  # f
 bin/rvwctl RECALL <question>               # r
@@ -296,6 +298,15 @@ screenshot and queues its OCR text, `S` queues and asks the model, `c TEXT` /
 with `rvwctl pl` / `rvwctl p X`), `:STATUS` and friends reach every socket
 command, `q` quits. Software capture reads the screen, so the terminal running
 it needs Screen Recording permission.
+
+The same ordered pending context is reachable without a console: `SCREEN_ADD`
+(the menu's "Screenshot and queue") archives a shot, OCRs it immediately and
+queues the text, and `SCREEN_ANALYZE` does the same and then submits everything
+pending under the selected prompt - clearing it only once the request was
+accepted, so a busy model loses nothing. Socket commands answer as soon as the
+request is queued rather than waiting out the streamed answer, and neither
+hides a window nor waits out a capture delay. `SCREEN_VISION` stays the
+independent vision-model flow and shares nothing with it.
 
 For `s`/`S` the console hides itself by default: Hammerspoon (`hs -c`, so
 Hammerspoon must be running with Accessibility permission) minimizes only the

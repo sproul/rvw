@@ -20,6 +20,7 @@ text the Vision helper extracted, and the request header says so.
 import select
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 
@@ -54,12 +55,18 @@ class Console:
         # The capture seam is this one attribute: software capture today, a HDMI
         # UVC grabber later, and a stub in tests.
         self._capture = capture or self._software_capture
-        self._ocr = ocr_reader or ocr.ocr_text_of
+        self._ocr_reader = ocr_reader
         self._input_stream = input_stream or sys.stdin
         self._hs = hs_runner or self._run_hammerspoon
+        # Socket commands and this read loop run on different threads and share
+        # the pending context; every read-modify-write of it takes this lock.
+        self._pending_lock = threading.Lock()
         self.pending = []
         self._screenshot_count = 0
         self._comment_count = 0
+
+    def _ocr(self, image_path):
+        return (self._ocr_reader or ocr.ocr_text_of)(image_path)
 
     # -- the read loop -----------------------------------------------------
 
@@ -126,41 +133,58 @@ class Console:
         text = text.strip()
         if not text:
             return "FAIL a comment needs text"
-        self._comment_count += 1
-        self.pending.append(_PendingItem("comment", self._comment_count, "", text))
-        return self._maybe_submit(submit, "comment %d noted" % self._comment_count)
+        with self._pending_lock:
+            self._comment_count += 1
+            number = self._comment_count
+            self.pending.append(_PendingItem("comment", number, "", text))
+        return self._maybe_submit(submit, "comment %d noted" % number)
 
-    def _capture_and_append(self, submit):
+    def capture_and_append_for_command(self, submit):
+        """A dispatcher screen command: the plain archiver, no hiding or delay.
+
+        The console window is not frontmost when a hotkey arrives over the
+        control socket, so there is nothing to hide and nothing to wait for.
+        The reply must not wait for the answer either: the socket serves
+        commands serially, and a model that loads on demand would stall STATUS
+        and QUIT behind it for the better part of a minute.
+        """
+        return self._capture_and_append(submit, capture=self._software_capture,
+                                        wait_for_answer=False)
+
+    def _capture_and_append(self, submit, capture=None, wait_for_answer=True):
         """Archive a screenshot, OCR it, queue the text; a failure queues nothing."""
+        capture = capture or self._capture_for_console
         try:
-            saved = self._capture_for_console()
+            saved = capture(self._assistant._session_started_epoch)
             text = self._ocr(saved.image_path).strip()
         except Exception as error:
             return "FAIL %s" % error
         if not text:
             return "FAIL OCR of %s produced no text; nothing was queued" % saved.image_path.name
-        self._screenshot_count += 1
-        self.pending.append(_PendingItem("screenshot", self._screenshot_count,
-                                         saved.image_path.name, text))
+        with self._pending_lock:
+            self._screenshot_count += 1
+            number = self._screenshot_count
+            self.pending.append(_PendingItem("screenshot", number,
+                                             saved.image_path.name, text))
         return self._maybe_submit(
-            submit, "screenshot %d queued as %s" % (self._screenshot_count,
-                                                    saved.image_path.name))
+            submit, "screenshot %d queued as %s" % (number, saved.image_path.name),
+            wait_for_answer=wait_for_answer)
 
-    def _capture_for_console(self):
+    def _capture_for_console(self, session_epoch):
         if config.auto_hide_console:
-            return self._capture_with_hidden_console()
-        return self._capture_with_switch_delay()
+            return self._capture_with_hidden_console(session_epoch)
+        return self._capture_with_switch_delay(session_epoch)
 
-    def _capture_with_switch_delay(self):
+    def _capture_with_switch_delay(self, session_epoch):
         """Typing in this terminal makes it frontmost; give Cmd-Tab a moment."""
         delay = config.console_capture_delay_seconds
         if delay > 0:
             print("switch to the window to capture (Cmd-Tab); capturing in %gs" % delay)
             sys.stdout.flush()
             time.sleep(delay)
-        return self._capture(self._assistant._session_started_epoch)
+        return self._capture(session_epoch)
 
-    def _capture_with_hidden_console(self):
+    def _capture_with_hidden_console(self, session_epoch):
         """Minimize only this window, capture the whole display, put it back.
 
         Hammerspoon does the window work over `hs -c`. No delay: the window is
@@ -171,7 +195,7 @@ class Console:
         """
         window_id = self._minimize_frontmost_window()
         try:
-            return self._capture(self._assistant._session_started_epoch,
+            return self._capture(session_epoch,
                                  target="display", exclude_window_id=window_id)
         finally:
             self._restore_minimized_window(window_id)
@@ -223,29 +247,35 @@ class Console:
         return screenshot.capture_screenshot(session_epoch, target=target,
                                              exclude_window_id=exclude_window_id)
 
-    def _maybe_submit(self, submit, append_reply):
+    def _maybe_submit(self, submit, append_reply, wait_for_answer=True):
         if not submit:
             return "OK %s" % append_reply
-        return self._submit()
+        return self._submit(wait_for_answer)
 
     # -- submitting --------------------------------------------------------
 
-    def _submit(self):
-        """Queue the pending context as one model request; clear it only on success."""
-        if not self.pending:
-            return "FAIL nothing to submit"
-        messages = self._build_messages()
-        context_text = messages[1]["content"]
-        if not self._assistant.ask_the_model(messages, context_text,
-                                             self._assistant._selected_prompt_key):
-            return "FAIL an answer is already in progress; the context is kept"
-        queued = len(self.pending)
-        self.pending = []
-        self._screenshot_count = 0
-        self._comment_count = 0
-        self._wait_for_the_answer()
-        return "OK submitted %d item(s) under prompt %s" % (
-            queued, self._assistant._selected_prompt_key)
+    def _submit(self, wait_for_answer=True):
+        """Queue the pending context as one model request; clear it only on success.
+
+        `wait_for_answer` keeps a typed `rvw> ` prompt from interleaving with
+        the answer being streamed; a socket command has no prompt to protect,
+        so it returns as soon as the request is queued.
+        """
+        with self._pending_lock:
+            if not self.pending:
+                return "FAIL nothing to submit"
+            prompt_key = self._assistant._selected_prompt_key
+            messages = self._build_messages()
+            context_text = messages[1]["content"]
+            if not self._assistant.ask_the_model(messages, context_text, prompt_key):
+                return "FAIL an answer is already in progress; the context is kept"
+            queued = len(self.pending)
+            self.pending = []
+            self._screenshot_count = 0
+            self._comment_count = 0
+        if wait_for_answer:
+            self._wait_for_the_answer()
+        return "OK submitted %d item(s) under prompt %s" % (queued, prompt_key)
 
     def _wait_for_the_answer(self):
         """The next prompt must not interleave with the answer being streamed."""
