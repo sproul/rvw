@@ -32,7 +32,7 @@ config.hotkeys = {
   -- two are safe to press mid-meeting; nothing else here draws anything at all.
   {mods = {"alt", "cmd"}, key = "w", local_action = "toggle_transcript_window",
    description = "show or hide the rolling transcript window"},
-  {mods = {"ctrl", "alt", "cmd"}, key = "w", local_action = "toggle_answer_window",
+  {mods = {"ctrl", "alt", "cmd"}, key = "a", local_action = "toggle_answer_window",
    description = "show or hide the answer window"},
 }
 

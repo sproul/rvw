@@ -84,6 +84,45 @@ class CommandsNamedByTheUserInterfaceTest(unittest.TestCase):
             path.read_text(encoding="ascii")
 
 
+class HotkeyConfigTest(lua_testing.PureLuaTestCase):
+    """The hotkey table itself, read from the checkout by dofile rather than
+    from Hammerspoon's cached copy: what rvw_hotkeys will bind on reload."""
+
+    module_name = "rvw_config"
+
+    def hotkey_actions(self):
+        listed = self.evaluate_body("""
+            local names = {}
+            for _, entry in ipairs(module.hotkeys) do
+              table.insert(names, entry.command or entry.local_action or "?")
+            end
+            return table.concat(names, "\\n")
+            """)
+        return listed.splitlines()
+
+    def combo_for_action(self, action):
+        return self.evaluate_body("""
+            for _, entry in ipairs(module.hotkeys) do
+              if (entry.command or entry.local_action) == "%s" then
+                return table.concat(entry.mods, "+") .. "+" .. entry.key
+              end
+            end
+            return "none"
+            """ % action)
+
+    def test_the_answer_window_is_bound_to_ctrl_alt_cmd_a(self):
+        """ctrl-alt-cmd-W is export_LLM_chat's (save the Windsurf chat), so the
+        answer window took A instead."""
+        self.assertIn("toggle_answer_window", self.hotkey_actions())
+        self.assertEqual("ctrl+alt+cmd+a",
+                         self.combo_for_action("toggle_answer_window"))
+
+    def test_the_transcript_window_keeps_alt_cmd_w(self):
+        self.assertIn("toggle_transcript_window", self.hotkey_actions())
+        self.assertEqual("alt+cmd+w",
+                         self.combo_for_action("toggle_transcript_window"))
+
+
 class MenuBarTitleTest(lua_testing.PureLuaTestCase):
     """The title is the recording indicator: it has to be right at a glance."""
 
