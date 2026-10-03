@@ -67,6 +67,13 @@ class CommandsNamedByTheUserInterfaceTest(unittest.TestCase):
         text = (hammerspoon_dir / "rvw_client.lua").read_text(encoding="utf-8")
         self.assertIn("STATUS_FIELDS", commands_named_in(text))
 
+    def test_every_command_hammerspoon_sends_is_marked_as_a_hotkey(self):
+        """A hotkey or a menu click leaves the window of interest frontmost, so
+        the assistant must not hide it before a screenshot; unmarked commands
+        come from a terminal, whose window it does hide."""
+        text = (hammerspoon_dir / "rvw_client.lua").read_text(encoding="utf-8")
+        self.assertIn('client.rvwctl .. " -hotkey " .. command', text)
+
     def test_every_hotkey_names_a_command_or_a_local_action(self):
         entries = hotkey_entries()
         self.assertTrue(entries, "no hotkeys are declared")

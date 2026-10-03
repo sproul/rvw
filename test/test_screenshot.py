@@ -111,7 +111,7 @@ class SuccessfulCaptureTest(ScreenshotTestCase):
 
 class HelperInvocationTest(ScreenshotTestCase):
     """The python side must pass the chosen target and any window exclusion
-    through to the helper verbatim: the console's auto-hide mode depends on it."""
+    through to the helper verbatim."""
 
     def install_recording_helper(self):
         args_path = self.root / "helper_args.txt"

@@ -291,35 +291,34 @@ bin/rvw --source none --console
 
 runs the assistant in this terminal (`--console` implies `-here`, which on its
 own remains the way to run in-terminal without a console for debugging) with an
-`rvw> ` prompt: `s` takes a
-screenshot and queues its OCR text, `S` queues and asks the model, `c TEXT` /
-`C TEXT` do the same for a typed comment, `send` resubmits after a busy reply,
-`pl` lists the selectable prompts in full and `p X` selects one by letter
-(`c`, `e`, `r`, `u`, `v`; the choice is kept in `var/selected_prompt` and shared
-with `rvwctl pl` / `rvwctl p X`), `:STATUS` and friends reach every socket
-command, `q` quits. Software capture reads the screen, so the terminal running
-it needs Screen Recording permission.
+`rvw> ` prompt. Every line but `?` is a dispatcher command, typed exactly as
+`bin/rvwctl` would send it, so a shortcut means the same thing at the prompt as
+on a hotkey: `sa` takes a screenshot and queues its OCR text, `sx` queues and
+asks the model, `n TEXT` / `N TEXT` do the same for a typed comment, `send`
+submits what is queued (and resubmits after a busy reply), `pl` lists the
+selectable prompts in full and `p X` selects one by letter (`c`, `e`, `r`, `u`,
+`v`; the choice is kept in `var/selected_prompt`), `?` lists every command with
+its shortcut, and `q` quits. Software capture reads the screen, so the terminal
+running it needs Screen Recording permission.
 
-The same ordered pending context is reachable without a console: `SCREEN_ADD`
-(the menu's "Screenshot and queue") archives a shot, OCRs it immediately and
-queues the text, and `SCREEN_ANALYZE` does the same and then submits everything
-pending under the selected prompt - clearing it only once the request was
-accepted, so a busy model loses nothing. Socket commands answer as soon as the
-request is queued rather than waiting out the streamed answer, and neither
-hides a window nor waits out a capture delay. `SCREEN_VISION` stays the
+The pending context belongs to the assistant, not to the prompt: the hotkeys
+fill the same one with or without `--console`. `SCREEN_ANALYZE` and `SUBMIT`
+clear it only once the request was accepted, so a busy model loses nothing.
+Commands answer as soon as the request is queued; at the prompt the next
+`rvw> ` waits until the streamed answer is complete. `SCREEN_VISION` stays the
 independent vision-model flow and shares nothing with it.
 
-For `s`/`S` the console hides itself by default: Hammerspoon (`hs -c`, so
-Hammerspoon must be running with Accessibility permission) minimizes only the
-console's own window, the helper captures the whole main display (including
-whatever other windows are visible) while excluding the hidden one by id, and
-the window is put back and focused afterwards, even if the capture failed.
-Missing Hammerspoon or a window that will not minimize is a FAIL and no capture
-happens at all. `--no-auto-hide-console` opts back into the old behaviour: the
-window stays, and the screenshot instead pauses `console_capture_delay_seconds`
-(2 s) to leave time for a Cmd-Tab back to the window of interest, which is the
-right choice when Hammerspoon is not running or minimizing the terminal would
-be disruptive.
+A screenshot normally captures the frontmost window. A command typed into a
+terminal (a console line, or `bin/rvwctl` run in a shell) came from the frontmost
+window, which is the one thing not worth photographing, so for those the
+assistant has Hammerspoon minimize it, captures the whole display without it, and
+puts it back. Hammerspoon sends its own commands as `rvwctl -hotkey ...`, because
+a hotkey or a menu click leaves the window of interest frontmost; that window is
+captured as it is. Without Hammerspoon a typed screen command fails rather than
+photograph the terminal.
+
+A command that takes no arguments refuses any it is given, so a stray `c remember
+this` fails instead of toggling capture and dropping the words.
 
 ### The other scripts
 
@@ -366,6 +365,7 @@ from outside are environment variables:
 
 | Variable | Default | What it changes |
 | --- | --- | --- |
+| `RVW_TEXT_MODEL` | `claude_code` | what answers questions at start-up: `claude_code` (the local `claude` command with its default model) or an identifier the endpoint serves |
 | `RVW_LLM_URL` | `http://127.0.0.1:1234/v1` | the endpoint |
 | `RVW_LLM_MODEL` | `meeting-assistant` | the identifier the model is served under |
 | `RVW_LLM_SOURCE_MODEL` | per host, see below | the model loaded under that identifier |

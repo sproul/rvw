@@ -88,6 +88,16 @@ llm_temperature = 0.3
 llm_request_timeout_seconds = 300.0
 vision_llm_model = os.environ.get("RVW_VLM_MODEL", "meeting-vision")
 
+# The text model questions go to when the assistant starts; SET_MODEL changes it
+# while it runs. "claude_code" is not served by the endpoint: it runs the local
+# claude command line with that command's own default model. It is the default
+# for now so that a weak local model is ruled out while the prompts are worked
+# out; the local models are to be compared against it later. Vision stays local.
+claude_code_model = "claude_code"
+text_model = os.environ.get("RVW_TEXT_MODEL", claude_code_model)
+# Absolute for the same reason as lms_command: rvw.app inherits no shell PATH.
+claude_command = Path.home() / ".local" / "bin" / "claude"
+
 # Qwen3.6 does think far longer than these questions deserve: measured at
 # temperature 0, "what is a unit test" costs 489 reasoning tokens and twelve
 # seconds to produce a twenty token answer. There is nothing here to turn that
@@ -186,10 +196,10 @@ screenshot_timeout_seconds = 20.0
 ocr_helper_path = bin_dir / "ocr_image"
 ocr_timeout_seconds = 30.0
 
-# Typing in the console terminal makes that terminal frontmost, so a console
-# screenshot pauses to let a Cmd-Tab back to the window of interest land first.
-console_capture_delay_seconds = 2.0
-auto_hide_console = False
+# Hammerspoon's command line client, which hides the window a typed command came
+# from before a screenshot. Named in full because the daemon inside bin/rvw.app
+# runs with LaunchServices' PATH, which does not include /usr/local/bin.
+hammerspoon_cli_path = Path("/usr/local/bin/hs")
 
 
 def require_known_stream(stream_name):

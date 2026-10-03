@@ -8,6 +8,7 @@ names and their shortcuts are case sensitive on purpose: `c` toggles capture and
 
 import unittest
 
+from rvw import commands
 from rvw.commands import CommandDispatcher
 
 
@@ -17,9 +18,11 @@ class CommandDispatcherTest(unittest.TestCase):
         self.calls = []
         self.dispatcher = CommandDispatcher()
         self.dispatcher.register("EXPLAIN_SPEECH", self.record_call,
-                                 description="explain recent speech", shortcut="E")
+                                 description="explain recent speech", shortcut="E",
+                                 takes_arguments=True)
         self.dispatcher.register("UNGARBLE_SPEECH", self.ungarble_call,
-                                 description="ungarble recent speech", shortcut="C")
+                                 description="ungarble recent speech", shortcut="C",
+                                 takes_arguments=True)
         self.dispatcher.register("AUDIO_CAPTURE_TOGGLE", self.capture_call,
                                  description="toggle audio capture", shortcut="c")
         self.dispatcher.register("ANSWER", self.record_call)
@@ -81,6 +84,36 @@ class CommandDispatcherTest(unittest.TestCase):
     def raise_error(self, arguments):
         raise RuntimeError("kaboom")
 
+    # -- arguments ---------------------------------------------------------
+
+    def test_arguments_to_a_command_that_takes_none_are_refused_unrun(self):
+        for line in ["ANSWER extra", "c remember this"]:
+            reply = self.dispatcher.dispatch(line)
+            self.assertTrue(reply.startswith("FAIL "), line)
+            self.assertIn("takes no arguments", reply)
+            self.assertIn(line.split(" ", 1)[1], reply)
+        self.assertEqual([], self.calls)
+
+    def test_a_command_that_takes_none_still_runs_without_any(self):
+        self.assertEqual("OK toggled", self.dispatcher.dispatch("c"))
+
+    # -- where a request came from -----------------------------------------
+
+    def record_window_flag(self, arguments):
+        self.calls.append(("window", commands.sent_from_frontmost_window()))
+        return "noted"
+
+    def test_a_request_is_not_from_the_frontmost_window_unless_marked(self):
+        self.dispatcher.register("WHERE", self.record_window_flag)
+        self.dispatcher.dispatch("WHERE")
+        self.dispatcher.dispatch("WHERE", sent_from_frontmost_window=True)
+        self.assertEqual([("window", False), ("window", True)], self.calls)
+
+    def test_the_mark_ends_with_its_request_even_when_the_handler_fails(self):
+        self.dispatcher.register("BOOM", self.raise_error)
+        self.dispatcher.dispatch("BOOM", sent_from_frontmost_window=True)
+        self.assertFalse(commands.sent_from_frontmost_window())
+
     # -- registration ------------------------------------------------------
 
     def test_registering_the_same_command_twice_is_a_programming_error(self):
@@ -112,16 +145,6 @@ class CommandDispatcherTest(unittest.TestCase):
         for blank in ["", "   "]:
             with self.assertRaises(ValueError):
                 self.dispatcher.register("NEW", self.record_call, shortcut=blank)
-
-    # -- recognising -------------------------------------------------------
-
-    def test_a_canonical_name_and_a_shortcut_are_both_recognised(self):
-        self.assertTrue(self.dispatcher.recognises("EXPLAIN_SPEECH"))
-        self.assertTrue(self.dispatcher.recognises("E"))
-
-    def test_an_unregistered_or_differently_cased_word_is_not_recognised(self):
-        for word in ["explain_speech", "e", "WIBBLE", ""]:
-            self.assertFalse(self.dispatcher.recognises(word), word)
 
     # -- listing -----------------------------------------------------------
 

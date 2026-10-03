@@ -21,6 +21,12 @@ max_command_bytes = 4096
 # their successes go unlogged: a poll that fails is news worth seeing.
 quietly_polled_commands = frozenset({"STATUS_FIELDS"})
 
+# Hammerspoon starts every request it sends with this word (`rvwctl -hotkey`):
+# a hotkey or a menu click leaves the window of interest frontmost. Any other
+# request was typed into the window that is frontmost now, which a screenshot
+# must therefore leave out.
+hotkey_marker = "@hotkey"
+
 
 class ControlSocketServer:
     """Accept one command per connection and reply with a single line."""
@@ -64,9 +70,11 @@ class ControlSocketServer:
                 self._handle_connection(connection)
 
     def _handle_connection(self, connection):
-        command_line = connection.recv(max_command_bytes).decode("utf-8", "replace")
-        reply = self._dispatcher.dispatch(command_line)
-        self._log_unless_a_successful_poll(command_line.strip(), reply)
+        received = connection.recv(max_command_bytes).decode("utf-8", "replace")
+        command_line, from_hotkey = split_off_the_hotkey_marker(received)
+        reply = self._dispatcher.dispatch(command_line,
+                                          sent_from_frontmost_window=not from_hotkey)
+        self._log_unless_a_successful_poll(command_line, reply)
         connection.sendall((reply + "\n").encode("utf-8"))
 
     def _log_unless_a_successful_poll(self, command_line, reply):
@@ -74,3 +82,11 @@ class ControlSocketServer:
         if command_line in quietly_polled_commands and reply.startswith("OK"):
             return
         log.info("%s <- %s", reply, command_line)
+
+
+def split_off_the_hotkey_marker(received):
+    """The command line without the marker, and whether the marker was there."""
+    words = received.strip().split(None, 1)
+    if words and words[0] == hotkey_marker:
+        return (words[1] if len(words) > 1 else ""), True
+    return received.strip(), False

@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from rvw import commands
 from rvw.commands import CommandDispatcher
 from rvw.control import ControlSocketServer
 
@@ -31,7 +32,11 @@ class ControlServerLoggingTestCase(unittest.TestCase):
         dispatcher = CommandDispatcher()
         dispatcher.register("STATUS", lambda arguments: "idle")
         dispatcher.register("STATUS_FIELDS", self.report_status_fields)
+        dispatcher.register("WHERE", self.report_window_flag)
         return dispatcher
+
+    def report_window_flag(self, arguments):
+        return "frontmost=%s" % commands.sent_from_frontmost_window()
 
     def report_status_fields(self, arguments):
         if self.status_is_unavailable:
@@ -60,6 +65,23 @@ class ControlServerLoggingTestCase(unittest.TestCase):
         with self.assertLogs("rvw.control", level="INFO") as captured:
             self.send_command_and_read_reply("STATUS\n")
         self.assertEqual(captured.output, ["INFO:rvw.control:OK idle <- STATUS"])
+
+
+
+class RequestOriginTest(ControlServerLoggingTestCase):
+    """A command typed into a terminal comes from the frontmost window, which a
+    screenshot must therefore leave out; Hammerspoon marks its own requests,
+    because a hotkey or a menu click leaves the window of interest frontmost."""
+
+    def test_an_unmarked_command_is_from_the_frontmost_window(self):
+        self.assertEqual("OK frontmost=True\n", self.send_command_and_read_reply("WHERE\n"))
+
+    def test_a_hotkey_command_is_not(self):
+        self.assertEqual("OK frontmost=False\n",
+                         self.send_command_and_read_reply("@hotkey WHERE\n"))
+
+    def test_the_marker_alone_is_not_a_command(self):
+        self.assertTrue(self.send_command_and_read_reply("@hotkey\n").startswith("FAIL "))
 
 
 if __name__ == "__main__":

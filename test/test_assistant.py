@@ -12,24 +12,27 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from rvw import config, prompts
-from rvw.assistant import Assistant
-from rvw.llm import LocalLlmError
+from rvw.assistant import Assistant, text_llm_for
+from rvw.claude_code_llm import ClaudeCodeLlm
+from rvw.llm import LocalLlm, LocalLlmError
 from rvw.transcript import TranscriptSegment
 
 expected_commands = ["ANSWER", "AUDIO_CAPTURE_START", "AUDIO_CAPTURE_STOP",
-                     "AUDIO_CAPTURE_TOGGLE", "EXPLAIN_SPEECH", "MODELS",
+                     "AUDIO_CAPTURE_TOGGLE", "COMMENT", "COMMENT_SUBMIT",
+                     "EXPLAIN_SPEECH", "MODELS",
                      "PROMPT_LIST", "PROMPT_SET",
                      "QUIT", "RECALL", "REINDEX", "SCREEN_ADD", "SCREEN_ANALYZE",
                      "SCREEN_SAVE", "SCREEN_VISION", "SEARCH",
                      "SET_LANGUAGE", "SET_MODEL", "STATUS", "STATUS_FIELDS",
-                     "TRANSCRIPT_SHOW", "TRANSCRIPT_START", "TRANSCRIPT_STOP",
+                     "SUBMIT", "TRANSCRIPT_SHOW", "TRANSCRIPT_START", "TRANSCRIPT_STOP",
                      "TRANSCRIPT_TOGGLE", "UNGARBLE_SPEECH"]
 
 expected_shortcuts = {"ANSWER": "A", "AUDIO_CAPTURE_START": "c+",
                       "AUDIO_CAPTURE_STOP": "c-", "AUDIO_CAPTURE_TOGGLE": "c",
+                      "COMMENT": "n", "COMMENT_SUBMIT": "N",
                       "EXPLAIN_SPEECH": "E", "MODELS": "ml",
                       "PROMPT_LIST": "pl", "PROMPT_SET": "p",
                       "QUIT": "q", "RECALL": "r", "REINDEX": "R",
@@ -37,6 +40,7 @@ expected_shortcuts = {"ANSWER": "A", "AUDIO_CAPTURE_START": "c+",
                       "SCREEN_SAVE": "s", "SCREEN_VISION": "V", "SEARCH": "f",
                       "SET_LANGUAGE": "l",
                       "SET_MODEL": "m", "STATUS": "S", "STATUS_FIELDS": "F",
+                      "SUBMIT": "send",
                       "TRANSCRIPT_SHOW": "T", "TRANSCRIPT_START": "t+",
                       "TRANSCRIPT_STOP": "t-", "TRANSCRIPT_TOGGLE": "t",
                       "UNGARBLE_SPEECH": "C"}
@@ -105,6 +109,7 @@ class AssistantCommandTestCase(unittest.TestCase):
         self.saved_helper_path = config.screen_capture_helper_path
         self.saved_index_db = config.index_db_path
         self.saved_selected_prompt_path = config.selected_prompt_path
+        self.saved_claude_command = config.claude_command
         config.archive_dir = self.root / "meetings"
         config.index_db_path = self.root / "index" / "meetings.db"
         config.selected_prompt_path = self.root / "selected_prompt"
@@ -125,6 +130,7 @@ class AssistantCommandTestCase(unittest.TestCase):
         config.archive_dir = self.saved_archive_dir
         config.screen_capture_helper_path = self.saved_helper_path
         config.index_db_path = self.saved_index_db
+        config.claude_command = self.saved_claude_command
         config.selected_prompt_path = self.saved_selected_prompt_path
         self.temporary_directory.cleanup()
 
@@ -175,6 +181,35 @@ class RegisteredCommandsTest(AssistantCommandTestCase):
         reply = self.dispatch("C 30")
         self.assertTrue(reply.startswith("OK "), reply)
         self.assertIn("30", reply)
+
+    def test_exactly_these_commands_take_arguments(self):
+        self.assertEqual({"AUDIO_CAPTURE_START", "AUDIO_CAPTURE_TOGGLE", "COMMENT",
+                          "COMMENT_SUBMIT", "EXPLAIN_SPEECH", "PROMPT_SET", "RECALL",
+                          "SCREEN_VISION", "SEARCH", "SET_LANGUAGE", "SET_MODEL",
+                          "TRANSCRIPT_SHOW", "UNGARBLE_SPEECH"},
+                         set(Assistant.commands_taking_arguments))
+
+    def test_every_other_command_refuses_arguments_without_running(self):
+        for name in self.assistant._dispatcher.command_names():
+            if name in Assistant.commands_taking_arguments:
+                continue
+            reply = self.dispatch(name + " extra")
+            self.assertTrue(reply.startswith("FAIL "), name)
+            self.assertIn("takes no arguments", reply, name)
+        self.assertFalse(self.assistant._quit_requested.is_set())
+
+    def test_a_window_length_is_one_number_and_nothing_after_it(self):
+        for line in ["E 30 extra", "C 30 40", "T 30 seconds"]:
+            reply = self.dispatch(line)
+            self.assertTrue(reply.startswith("FAIL "), line)
+            self.assertIn("one number", reply, line)
+
+    def test_the_capture_toggle_checks_its_stream_names_before_stopping(self):
+        running = MagicMock(is_running=True)
+        self.assistant._streams = {"system": running}
+        reply = self.dispatch("c remember this")
+        self.assertTrue(reply.startswith("FAIL "), reply)
+        running.stop.assert_not_called()
 
     def test_the_formerly_supported_command_names_are_rejected(self):
         for old_name in former_commands:
@@ -286,8 +321,32 @@ class ModelSelectionTest(AssistantCommandTestCase):
         """Machine readable, for the same reason as STATUS_FIELDS: the menu builds
         its model list from this."""
         reply = self.dispatch("MODELS")
-        self.assertIn("serving=%s,%s" % (config.llm_model, config.vision_llm_model), reply)
+        self.assertIn("serving=%s,%s,%s" % (config.claude_code_model, config.llm_model,
+                                            config.vision_llm_model), reply)
         self.assertIn("answering=%s" % config.llm_model, reply)
+
+    def test_claude_code_is_offered_even_without_a_local_endpoint(self):
+        self.llm.raise_on_available_models = True
+        self.assertTrue(self.dispatch("MODELS").endswith(
+            "serving=%s" % config.claude_code_model))
+
+    def test_claude_code_is_not_offered_where_the_claude_command_is_missing(self):
+        config.claude_command = self.root / "no_claude_here"
+        self.assertNotIn(config.claude_code_model, self.dispatch("MODELS"))
+        self.assertTrue(self.dispatch("SET_MODEL %s" % config.claude_code_model)
+                        .startswith("FAIL "))
+
+    def test_claude_code_can_be_chosen_and_answers_through_its_own_client(self):
+        self.assertTrue(self.dispatch("SET_MODEL %s" % config.claude_code_model)
+                        .startswith("OK "))
+        self.assertIsInstance(self.assistant._llm, ClaudeCodeLlm)
+        self.assertIn("model=%s" % config.claude_code_model, self.dispatch("STATUS_FIELDS"))
+
+    def test_a_local_model_chosen_after_claude_code_answers_through_the_endpoint(self):
+        self.dispatch("SET_MODEL %s" % config.claude_code_model)
+        self.dispatch("SET_MODEL %s" % config.llm_model)
+        self.assertIsInstance(self.assistant._llm, LocalLlm)
+
 
     def test_a_served_model_can_be_chosen_and_is_then_reported(self):
         self.assertTrue(self.dispatch("SET_MODEL %s" % config.vision_llm_model)
@@ -303,6 +362,21 @@ class ModelSelectionTest(AssistantCommandTestCase):
 
     def test_choosing_a_model_without_naming_one_is_refused(self):
         self.assertTrue(self.dispatch("SET_MODEL").startswith("FAIL "))
+
+
+class DefaultTextModelTest(unittest.TestCase):
+    """Claude Code answers by default, to rule out a weak local model while the
+    prompts are being worked out; the local models are to be revisited later."""
+
+    def test_the_default_text_model_is_claude_code(self):
+        self.assertEqual("claude_code", config.claude_code_model)
+        self.assertEqual(config.claude_code_model, config.text_model)
+
+    def test_the_text_model_is_built_from_its_identifier(self):
+        self.assertIsInstance(text_llm_for(config.claude_code_model), ClaudeCodeLlm)
+        local = text_llm_for(config.llm_model)
+        self.assertIsInstance(local, LocalLlm)
+        self.assertEqual(config.llm_model, local.model)
 
 
 class RecognitionLanguageTest(AssistantCommandTestCase):
@@ -419,6 +493,26 @@ class LlmStatusReportTest(AssistantCommandTestCase):
         with self.assertLogs("rvw.assistant", level="DEBUG") as captured:
             self.assistant._report_llm_status()
         self.assertIn("ERROR", [record.levelname for record in captured.records])
+
+    def test_a_missing_server_is_only_news_while_claude_code_answers(self):
+        """Then only SCREEN_VISION needs the endpoint, and that one is optional."""
+        self.assistant._llm = ClaudeCodeLlm()
+        self.llm.raise_on_available_models = True
+        with self.assertLogs("rvw.assistant", level="DEBUG") as captured:
+            self.assistant._report_llm_status()
+        self.assertNotIn("ERROR", [record.levelname for record in captured.records])
+
+    def test_a_missing_claude_command_is_a_failure_while_claude_code_answers(self):
+        self.assistant._llm = ClaudeCodeLlm()
+        config.claude_command = self.root / "no_claude_here"
+        with self.assertLogs("rvw.assistant", level="DEBUG") as captured:
+            self.assistant._report_llm_status()
+        self.assertIn("ERROR", [record.levelname for record in captured.records])
+
+    def test_the_model_that_answers_questions_is_named(self):
+        captured = self.report_llm_status_with([])
+        self.assertTrue(any("questions go to %s" % config.llm_model in record.getMessage()
+                            for record in captured.records), captured.output)
 
 
 class UngarbleCommandTest(AssistantCommandTestCase):

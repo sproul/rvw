@@ -78,6 +78,17 @@ class WholeReplyTest(ControlClientTestCase):
         _, server = self.run_client("OK done\n", arguments=("RECALL", "what", "about", "reconnect"))
         self.assertEqual("RECALL what about reconnect", server.received)
 
+    def test_dash_hotkey_marks_the_command_for_the_assistant(self):
+        _, server = self.run_client("OK done\n", arguments=("-hotkey", "SCREEN_ADD"))
+        self.assertEqual("@hotkey SCREEN_ADD", server.received)
+
+    def test_dash_hotkey_without_a_command_is_a_usage_failure(self):
+        finished = subprocess.run([str(rvwctl), "-hotkey"], capture_output=True, text=True,
+                                  timeout=30,
+                                  env=dict(os.environ, RVW_CONTROL_SOCKET=str(self.socket_path)))
+        self.assertEqual(2, finished.returncode)
+        self.assertIn("usage", finished.stderr)
+
     def test_a_failure_reply_is_reported_as_a_failure(self):
         finished, _ = self.run_client("FAIL unknown command WIBBLE\n")
         self.assertEqual(1, finished.returncode)

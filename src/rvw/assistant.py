@@ -13,6 +13,7 @@ import time
 
 from . import config, meeting_index, prompts, recall, screenshot, session_log
 from .answer_buffer import AnswerBuffer
+from .claude_code_llm import ClaudeCodeLlm
 from .asr import WhisperTranscriber
 from .audio_source import CaptureStream
 from .commands import CommandDispatcher
@@ -31,6 +32,13 @@ all_stream_names = ["mic", "system"]
 class Assistant:
     """Wires the components together and implements the hotkey commands."""
 
+    # Every other command refuses arguments: `c remember this` typed out of an
+    # old habit must fail loudly, not toggle capture and drop the words.
+    commands_taking_arguments = frozenset({
+        "AUDIO_CAPTURE_START", "AUDIO_CAPTURE_TOGGLE", "COMMENT", "COMMENT_SUBMIT",
+        "EXPLAIN_SPEECH", "PROMPT_SET", "RECALL", "SCREEN_VISION", "SEARCH",
+        "SET_LANGUAGE", "SET_MODEL", "TRANSCRIPT_SHOW", "UNGARBLE_SPEECH"})
+
     def __init__(self, stream_names):
         self._session_started_epoch = time.time()
         self._archive = MeetingArchive(self._session_started_epoch, stream_names)
@@ -39,7 +47,7 @@ class Assistant:
         self._recognizer = RecognitionWorker(self._transcriber, self._transcript)
         self._streams = {name: CaptureStream(name, self._recognizer.submit)
                          for name in stream_names}
-        self._llm = LocalLlm()
+        self._llm = text_llm_for(config.text_model)
         self._vision_llm = LocalLlm(model=config.vision_llm_model, loads_on_demand=False,
                                     suppress_reasoning=False)
         self._meeting_index = meeting_index.MeetingIndex()
@@ -138,16 +146,39 @@ class Assistant:
         self._archive.stop_retaining()
 
     def _report_llm_status(self):
+        self._report_which_model_answers_questions()
         try:
-            served = self._llm.available_models()
+            served = self._models_the_local_endpoint_serves()
         except LocalLlmError as error:
-            log.error("FAIL %s; run util/init_local_models.sh before asking for explanations",
-                      error)
+            self._report_the_local_endpoint_is_missing(error)
             return
         log.info("OK  local LLM at %s serving %s", config.llm_base_url,
                  ", ".join(served) or "no loaded model")
         self._note_whether_the_configured_model_is_loaded(served)
         self._note_whether_the_vision_model_is_loaded(served)
+
+    def _report_which_model_answers_questions(self):
+        """claude_code is checked here, because nothing else would notice a missing
+        claude command before the first question failed in the middle of a meeting.
+        A local model is checked by the endpoint report that follows."""
+        if self._llm.model == config.claude_code_model:
+            try:
+                self._llm.available_models()
+            except LocalLlmError as error:
+                log.error("FAIL %s; questions go to %s and will fail", error,
+                          config.claude_code_model)
+                return
+        log.info("OK  questions go to %s", self._llm.model)
+
+    def _report_the_local_endpoint_is_missing(self, error):
+        """Only a failure while a local model answers questions; otherwise only
+        SCREEN_VISION needs the endpoint, and interpretation is optional."""
+        if self._llm.model == config.claude_code_model:
+            log.info("INFO %s; only SCREEN_VISION needs it while questions go to %s",
+                     error, config.claude_code_model)
+            return
+        log.error("FAIL %s; run util/init_local_models.sh before asking for explanations",
+                  error)
 
     @staticmethod
     def _note_whether_the_configured_model_is_loaded(served_models):
@@ -195,6 +226,11 @@ class Assistant:
                  "stop audio capture", "c-"),
                 ("AUDIO_CAPTURE_TOGGLE", self._command_toggle_capture,
                  "toggle audio capture", "c"),
+                ("COMMENT", self._command_comment,
+                 "queue a typed comment in the pending context", "n"),
+                ("COMMENT_SUBMIT", self._command_comment_submit,
+                 "the same, then submit the whole pending context under the "
+                 "selected prompt", "N"),
                 ("EXPLAIN_SPEECH", self._command_explain,
                  "explain recent speech with the text model (optional seconds)", "E"),
                 ("MODELS", self._command_models,
@@ -211,7 +247,7 @@ class Assistant:
                  "rebuild the retained transcript search index", "R"),
                 ("SCREEN_ADD", self._command_screen_add,
                  "archive a screenshot, OCR it and queue the text in the "
-                 "console's pending context", "sa"),
+                 "pending context", "sa"),
                 ("SCREEN_ANALYZE", self._command_screen_analyze,
                  "the same, then submit the whole pending context under the "
                  "selected prompt", "sx"),
@@ -231,6 +267,9 @@ class Assistant:
                  "human readable session state", "S"),
                 ("STATUS_FIELDS", self._command_status_fields,
                  "session state as machine readable key=value pairs", "F"),
+                ("SUBMIT", self._command_submit,
+                 "submit the pending context as it is under the selected prompt",
+                 "send"),
                 ("TRANSCRIPT_SHOW", self._command_transcript,
                  "show the recent speech transcript (optional seconds)", "T"),
                 ("TRANSCRIPT_START", self._command_start_retaining,
@@ -241,7 +280,8 @@ class Assistant:
                  "toggle transcript retention", "t"),
                 ("UNGARBLE_SPEECH", self._command_ungarble,
                  "ungarble recent speech with the text model (optional seconds)", "C")]:
-            dispatcher.register(name, handler, description, shortcut=shortcut)
+            dispatcher.register(name, handler, description, shortcut=shortcut,
+                                takes_arguments=name in self.commands_taking_arguments)
         return dispatcher
 
     def _command_start_capture(self, arguments):
@@ -253,6 +293,7 @@ class Assistant:
         return "capture stopped (%s)" % (", ".join(stopped) or "was not running")
 
     def _command_toggle_capture(self, arguments):
+        self._requested_stream_names(arguments)
         if self._any_stream_running():
             return self._command_stop_capture(arguments)
         return self._command_start_capture(arguments)
@@ -285,31 +326,34 @@ class Assistant:
 
     def _command_screen_save(self, arguments):
         """Archival only: no OCR, no model, no network, nothing on screen."""
-        saved = screenshot.capture_screenshot(self._session_started_epoch)
+        saved = self._console.capture_screen()
         return "screenshot saved as %s" % saved.image_path.name
 
+    # The pending context commands all act on the one Console, whichever
+    # transport they arrived by.
+
     def _command_screen_add(self, arguments):
-        """Archive a shot, OCR it and queue the text beside the console's items."""
-        return self._screen_capture_command(submit=False)
+        """Archive a shot, OCR it and queue the text in the pending context."""
+        return self._console.add_screenshot(submit=False)
 
     def _command_screen_analyze(self, arguments):
         """The same capture and queue, then submit all of the pending context."""
-        return self._screen_capture_command(submit=True)
+        return self._console.add_screenshot(submit=True)
 
-    def _screen_capture_command(self, submit):
-        """The console's reply is already prefixed, while the dispatcher adds
-        'OK ' to whatever a handler returns -- strip the console's OK, and turn
-        its FAIL into the exception the dispatcher itself prefixes."""
-        reply = self._console.capture_and_append_for_command(submit)
-        if reply.startswith("FAIL "):
-            raise RuntimeError(reply[len("FAIL "):])
-        if reply.startswith("OK "):
-            return reply[len("OK "):]
-        return reply
+    def _command_comment(self, arguments):
+        return self._console.add_comment(" ".join(arguments), submit=False)
+
+    def _command_comment_submit(self, arguments):
+        return self._console.add_comment(" ".join(arguments), submit=True)
+
+    def _command_submit(self, arguments):
+        if arguments:
+            raise ValueError("SUBMIT takes no arguments; queue text with COMMENT first")
+        return self._console.submit()
 
     def _command_interpret_screen(self, arguments):
         """The same archival save, then a private interpretation in this terminal."""
-        saved = screenshot.capture_screenshot(self._session_started_epoch)
+        saved = self._console.capture_screen()
         return "screenshot saved as %s; %s" % (saved.image_path.name,
                                                self._interpretation_of(saved, arguments))
 
@@ -414,13 +458,13 @@ class Assistant:
         same reason STATUS_FIELDS is. It is asked only when the menu is opened,
         because unlike the rest of the status it costs a request to the endpoint.
         """
-        served = self._llm.available_models()
-        fields = {"answering": self._llm.model, "serving": ",".join(served) or "nothing"}
+        selectable = self._selectable_text_models()
+        fields = {"answering": self._llm.model, "serving": ",".join(selectable)}
         require_space_free_field_values(fields)
         return " ".join("%s=%s" % pair for pair in sorted(fields.items()))
 
     def _command_set_model(self, arguments):
-        """Ask a different one of the models this endpoint already serves.
+        """Ask claude_code or a different one of the models this endpoint already serves.
 
         Loading a different model is Phase 8 work and is not this. The identifier
         has to be served now, because this endpoint answers for an identifier it
@@ -428,13 +472,30 @@ class Assistant:
         would point the assistant at a model that never answers as itself.
         """
         identifier = self._required_query(arguments, "SET_MODEL")
-        served = self._llm.available_models()
-        if identifier not in served:
-            raise ValueError("this endpoint does not serve %r; it serves %s"
-                             % (identifier, ", ".join(served) or "nothing"))
-        self._llm = LocalLlm(model=identifier,
-                             loads_on_demand=identifier == config.llm_model)
+        selectable = self._selectable_text_models()
+        if identifier not in selectable:
+            raise ValueError("%r cannot answer; choose one of %s"
+                             % (identifier, ", ".join(selectable)))
+        self._llm = text_llm_for(identifier)
         return "questions now go to %s" % identifier
+
+    def _selectable_text_models(self):
+        """claude_code, then whatever the endpoint serves; either one missing only
+        shortens the list, because neither needs the other."""
+        return (self._models_from(ClaudeCodeLlm().available_models)
+                + self._models_from(self._models_the_local_endpoint_serves))
+
+    @staticmethod
+    def _models_from(list_models):
+        try:
+            return list_models()
+        except LocalLlmError as error:
+            log.info("INFO %s; its models cannot be chosen", error)
+            return []
+
+    def _models_the_local_endpoint_serves(self):
+        """The vision client is always a local one, so it is the one to ask."""
+        return self._vision_llm.available_models()
 
     def _command_prompt_list(self, arguments):
         """Every selectable prompt in full, the shared active one marked."""
@@ -514,6 +575,9 @@ class Assistant:
 
     @staticmethod
     def _requested_window_seconds(arguments, default_window_seconds):
+        if len(arguments) > 1:
+            raise ValueError("a window length is one number of seconds; got %r"
+                             % " ".join(arguments))
         return float(arguments[0]) if arguments else default_window_seconds
 
     def _start_answer(self, llm, messages, context_text, heading):
@@ -538,7 +602,10 @@ class Assistant:
 
     def _requested_stream_names(self, arguments):
         """Streams named on the command line, or every stream this run offers."""
-        return arguments or list(self._streams)
+        unknown = [name for name in arguments if name.lower() not in self._streams]
+        if unknown:
+            raise ValueError("unknown capture stream %s" % " ".join(unknown))
+        return [name.lower() for name in arguments] or list(self._streams)
 
     def _any_stream_running(self):
         return any(stream.is_running for stream in self._streams.values())
@@ -548,11 +615,8 @@ class Assistant:
             raise RuntimeError("no capture streams are configured (--source none)")
         started = []
         for name in stream_names:
-            stream = self._streams.get(name.lower())
-            if stream is None:
-                raise ValueError("unknown capture stream %s" % name)
-            if stream.start():
-                started.append(name.lower())
+            if self._streams[name].start():
+                started.append(name)
         return "capture running (%s)" % (", ".join(started) or "already running")
 
     def _run_continuous_analysis_if_due(self):
@@ -593,6 +657,16 @@ class Assistant:
         sys.stdout.flush()
 
 
+def text_llm_for(identifier):
+    """The client that answers questions as this identifier.
+
+    Only the assistant's own local model is loaded on demand; see LocalLlm.
+    """
+    if identifier == config.claude_code_model:
+        return ClaudeCodeLlm()
+    return LocalLlm(model=identifier, loads_on_demand=identifier == config.llm_model)
+
+
 def require_space_free_field_values(fields):
     """A space in a value would silently turn one field into two for the reader.
 
@@ -614,29 +688,13 @@ def parse_arguments(argv):
                         help="start capturing immediately instead of waiting for the hotkey")
     parser.add_argument("--console", action="store_true",
                         help="read console commands from this terminal (rvw> prompt)")
-    hide_flags = parser.add_mutually_exclusive_group()
-    hide_flags.add_argument("--auto-hide-console", dest="auto_hide_console",
-                            action="store_true", default=None,
-                            help="with --console, minimize this terminal's window and "
-                                 "capture the whole display (the default)")
-    hide_flags.add_argument("--no-auto-hide-console", dest="auto_hide_console",
-                            action="store_false",
-                            help="with --console, keep the window and wait "
-                                 "console_capture_delay_seconds for a Cmd-Tab instead")
     parser.add_argument("--debug", action="store_true", help="verbose logging")
-    arguments = parser.parse_args(argv)
-    if arguments.auto_hide_console is not None and not arguments.console:
-        parser.error("--auto-hide-console/--no-auto-hide-console "
-                     "only make sense with --console")
-    if arguments.auto_hide_console is None:
-        arguments.auto_hide_console = arguments.console
-    return arguments
+    return parser.parse_args(argv)
 
 
 def main(argv=None):
     arguments = parse_arguments(argv)
     config.debug_mode = arguments.debug
-    config.auto_hide_console = arguments.auto_hide_console
     stream_names = (all_stream_names if arguments.source == "both"
                     else [] if arguments.source == "none"
                     else [arguments.source])

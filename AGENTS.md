@@ -42,10 +42,13 @@
 - Run the tests: `util/run_tests.sh` (unittest, no pytest in the venv)
 - Run the assistant: `bin/rvw [--source mic|system|both] [--listen] [--debug]`, which starts it
   inside `bin/rvw.app`; `bin/rvw -here ...` runs it in this terminal instead
-- Send a command: `bin/rvwctl EXPLAIN_SPEECH|UNGARBLE_SPEECH|SCREEN_SAVE|SCREEN_ADD|SCREEN_ANALYZE|SCREEN_VISION|SEARCH|RECALL|REINDEX|AUDIO_CAPTURE_TOGGLE|AUDIO_CAPTURE_START|AUDIO_CAPTURE_STOP|TRANSCRIPT_START|TRANSCRIPT_STOP|TRANSCRIPT_TOGGLE|TRANSCRIPT_SHOW|ANSWER|MODELS|SET_MODEL|SET_LANGUAGE|PROMPT_LIST|PROMPT_SET|STATUS|STATUS_FIELDS|QUIT`,
-  or each command's case-sensitive shortcut (E, C, s, sa, sx, V, f, r, R, c, c+, c-, t+, t-, t, T, A,
+- Send a command: `bin/rvwctl EXPLAIN_SPEECH|UNGARBLE_SPEECH|SCREEN_SAVE|SCREEN_ADD|SCREEN_ANALYZE|SCREEN_VISION|COMMENT|COMMENT_SUBMIT|SUBMIT|SEARCH|RECALL|REINDEX|AUDIO_CAPTURE_TOGGLE|AUDIO_CAPTURE_START|AUDIO_CAPTURE_STOP|TRANSCRIPT_START|TRANSCRIPT_STOP|TRANSCRIPT_TOGGLE|TRANSCRIPT_SHOW|ANSWER|MODELS|SET_MODEL|SET_LANGUAGE|PROMPT_LIST|PROMPT_SET|STATUS|STATUS_FIELDS|QUIT`,
+  or each command's case-sensitive shortcut (E, C, s, sa, sx, V, n, N, send, f, r, R, c, c+, c-, t+, t-, t, T, A,
   ml, m, l, pl, p, S, F, q)
-  (`SEARCH <words>` and `RECALL <question>` take free text, e.g. `bin/rvwctl RECALL what did they say about reconnect behavior`)
+  (`SEARCH <words>` and `RECALL <question>` take free text, e.g. `bin/rvwctl RECALL what did they say about reconnect behavior`;
+  a command outside `Assistant.commands_taking_arguments` refuses arguments)
+  Hammerspoon sends `bin/rvwctl -hotkey COMMAND`; without `-hotkey` a screen command
+  minimizes the frontmost window (the terminal that typed it) for the capture
 - Show one window by hand: `bin/rvw_view --window transcript|answer [--seconds 300]`; the
   the menu bar does the same thing, and alt-cmd-W for the transcript window
 - Take one screenshot by hand: `bin/screen_capture --output /tmp/shot.png --target frontmost`
@@ -56,6 +59,13 @@
   `meeting-assistant`; override with `RVW_LLM_MODEL` and `RVW_LLM_URL`. Those name the
   identifier and the endpoint, not the model: the model loaded under that identifier is
   `config.llm_source_model` / `RVW_LLM_SOURCE_MODEL`.
+- Questions go to `config.text_model` (`RVW_TEXT_MODEL`), by default `claude_code`: not an
+  endpoint identifier but `src/rvw/claude_code_llm.py`, which runs `~/.local/bin/claude -p`
+  per question with claude's own default model, our system prompt, no tools, no saved
+  session, and `--safe-mode` so `~/.claude/CLAUDE.md` (written for coding) stays out of the
+  answers. It is the default so a weak local model is ruled out while the prompts are worked
+  out; the local models are to be compared against it later. `MODELS` offers it first and
+  `SET_MODEL` switches between it and the endpoint's models. Vision stays local.
 - Which model that is differs per machine, because the machine's memory decides it:
   `config.llm_source_model_by_host` gives m3 (96 GB) the 4-bit Qwen3.6-35B-A3B and m4
   (32 GB) the 3-bit quant of it, matching on the hostname's first component, with
@@ -109,12 +119,18 @@
   not weigh options, do not reconsider"), verified terse over five runs on m3 (0.7-1.6s each).
   Keep that discipline in any new prompt built for this model.
 - `SCREEN_ADD` (`sa`) and `SCREEN_ANALYZE` (`sx`) archive a screenshot, OCR it and
-  put the text on the one ordered pending context the console's `s`/`S`/`c`/`C`
-  lines also fill; `SCREEN_ANALYZE` then submits all of it under the selected
-  prompt and clears only once the request was accepted. One `Console` created in
+  put the text on the one ordered pending context that `COMMENT` (`n`) and
+  `COMMENT_SUBMIT` (`N`) also fill; `SCREEN_ANALYZE`, `COMMENT_SUBMIT` and `SUBMIT`
+  (`send`) submit all of it under the selected prompt and clear it only once the
+  request was accepted. The console has no commands of its own except `?`: every
+  other line goes to the dispatcher, so a shortcut means the same thing at the
+  `rvw> ` prompt as on a hotkey. One `Console` created in
   `Assistant.__init__` owns that context, so it works with or without `--console`;
   `_pending_lock` guards it because the control-socket thread and the console
-  read loop both write it. `SCREEN_VISION` stays the independent vision flow.
+  read loop both write it. Every screen command captures through
+  `Console.capture_screen`, the one capture seam; a request typed into the
+  frontmost window (`commands.sent_from_frontmost_window()`) is captured with that
+  window minimized through `config.hammerspoon_cli_path` and put back afterwards. `SCREEN_VISION` stays the independent vision flow.
 - `SCREEN_VISION` needs a vision model loaded as `meeting-vision`; override with
   `RVW_VLM_MODEL`. Everything else works without it. Without one it archives the image
   and replies `not interpreted: no model is loaded as 'meeting-vision'`.

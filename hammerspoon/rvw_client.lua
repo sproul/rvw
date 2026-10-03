@@ -13,8 +13,11 @@ client.repo_dir = module_dir:gsub("/hammerspoon$", "")
 client.rvwctl = client.repo_dir .. "/bin/rvwctl"
 
 --- Send one command and return its single line reply.
+-- Every command is marked -hotkey, the menu's included: a hotkey or a menu click
+-- leaves the window of interest frontmost, so the assistant must not hide it
+-- from a screenshot the way it hides a terminal that typed the command.
 function client.send(command)
-  local output, succeeded = hs.execute(client.rvwctl .. " " .. command)
+  local output, succeeded = hs.execute(client.rvwctl .. " -hotkey " .. command)
   local reply = (output or ""):gsub("%s+$", "")
   if not succeeded and reply == "" then
     return "FAIL could not run " .. client.rvwctl
