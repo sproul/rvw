@@ -347,7 +347,16 @@ One machine version:
 
 Two machine version:
 
-    - I connect the work machine HDMI output and the review machine USB input to the Elgato 4K X
+    - I connect the work machine HDMI output and the review machine USB input to the Elgato 4K X.
+      The work machine sees the Elgato as a second display: mirror its main display onto it
+      (System Settings, Displays), or the browser window is not in the picture the card sends.
+
+    - On the review machine, once: util/init_permissions.sh, which asks for the Camera
+      permission because the card is attached. Then start the assistant with
+                bin/rvw --screenshot-source hdmi
+      and check by hand that a frame arrives:
+                bin/hdmi_capture --output /tmp/hdmi.png --device "Elgato 4K X" && open /tmp/hdmi.png
+      (by hand that borrows the terminal's camera permission, not rvw.app's)
  
     - On the work machine I close all windows but one or two browser windows which I use to look at a software patch.
     

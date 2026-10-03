@@ -56,8 +56,9 @@ class Console:
     def __init__(self, assistant, capture=None, ocr_reader=None, input_stream=None,
                  hs_runner=None):
         self._assistant = assistant
-        # The capture seam is this one attribute: software capture today, a HDMI
-        # UVC grabber later, and a stub in tests.
+        # The capture seam is this one attribute: screenshot.capture_screenshot,
+        # which reads this screen or the HDMI capture card according to
+        # config.screenshot_source, and a stub in tests.
         self._capture = capture or screenshot.capture_screenshot
         self._ocr_reader = ocr_reader
         self._input_stream = input_stream or sys.stdin
@@ -164,9 +165,11 @@ class Console:
         Every screen command captures through here, so the capture seam is one
         attribute whatever the command. A request typed into the frontmost
         window (this console, or a terminal running rvwctl) would photograph
-        that window, so it is hidden for the capture; a hotkey is not.
+        that window, so it is hidden for the capture; a hotkey is not. Nor is
+        anything when the screen comes from the other Mac through the capture
+        card, which shows none of this Mac's windows.
         """
-        if commands.sent_from_frontmost_window():
+        if config.screenshot_source == "screen" and commands.sent_from_frontmost_window():
             return self._capture_with_the_requesting_window_hidden()
         return self._capture(self._assistant._session_started_epoch)
 

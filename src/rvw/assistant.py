@@ -551,6 +551,7 @@ class Assistant:
                 "model": self._llm.model,
                 "retention": "retained" if self._archive.is_retaining else "ephemeral",
                 "segments": str(self._transcript.segment_count),
+                "screenshot_source": config.screenshot_source,
                 "streams": ",".join(self._streams),
                 "vision_model": config.vision_llm_model}
 
@@ -688,13 +689,24 @@ def parse_arguments(argv):
                         help="start capturing immediately instead of waiting for the hotkey")
     parser.add_argument("--console", action="store_true",
                         help="read console commands from this terminal (rvw> prompt)")
+    parser.add_argument("--screenshot-source", default="screen",
+                        choices=config.screenshot_sources,
+                        help="'screen' captures this Mac's screen; 'hdmi' captures the other "
+                             "Mac's through the HDMI capture card %s"
+                             % config.hdmi_capture_device_name)
     parser.add_argument("--debug", action="store_true", help="verbose logging")
     return parser.parse_args(argv)
 
 
+def set_global_modes_from(arguments):
+    """The command line flags that change behaviour everywhere become globals."""
+    config.debug_mode = arguments.debug
+    config.screenshot_source = arguments.screenshot_source
+
+
 def main(argv=None):
     arguments = parse_arguments(argv)
-    config.debug_mode = arguments.debug
+    set_global_modes_from(arguments)
     stream_names = (all_stream_names if arguments.source == "both"
                     else [] if arguments.source == "none"
                     else [arguments.source])

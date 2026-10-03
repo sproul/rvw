@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 bin/audio_capture
 bin/screen_capture
+bin/hdmi_capture
 bin/rvw.app/
 var/
 bin/ocr_image

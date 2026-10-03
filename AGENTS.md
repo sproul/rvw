@@ -5,6 +5,10 @@
   screenshot archiving, optional transcript retention)
 - `helper/audio_capture.swift` Core Audio capture helper, built into `bin/audio_capture`
 - `helper/screen_capture.swift` ScreenCaptureKit helper, built into `bin/screen_capture`
+- `helper/hdmi_capture.swift` one frame from the HDMI capture card (the Elgato 4K X, a UVC
+  device, so it needs the Camera permission), built into `bin/hdmi_capture`
+- `helper/swift_build_settings.sh` the swiftc target both build scripts use: arm64 always,
+  because a shell under Rosetta otherwise builds x86_64
 - `helper/rvw_view.swift` the transcript and answer windows, built into `bin/rvw_view`;
   needs no permission, and its windows are excluded from screen capture
 - `bin/rvw` daemon launcher, `bin/rvwctl` hotkey client (system python, stdlib only)
@@ -40,7 +44,7 @@
 - Rebuild the searchable meeting index from the transcripts: `util/rebuild_index.sh` (the same
   rebuild as the assistant's `REINDEX`, without a running daemon)
 - Run the tests: `util/run_tests.sh` (unittest, no pytest in the venv)
-- Run the assistant: `bin/rvw [--source mic|system|both] [--listen] [--debug]`, which starts it
+- Run the assistant: `bin/rvw [--source mic|system|both] [--listen] [--screenshot-source screen|hdmi] [--debug]`, which starts it
   inside `bin/rvw.app`; `bin/rvw -here ...` runs it in this terminal instead
 - Send a command: `bin/rvwctl EXPLAIN_SPEECH|UNGARBLE_SPEECH|SCREEN_SAVE|SCREEN_ADD|SCREEN_ANALYZE|SCREEN_VISION|COMMENT|COMMENT_SUBMIT|SUBMIT|SEARCH|RECALL|REINDEX|AUDIO_CAPTURE_TOGGLE|AUDIO_CAPTURE_START|AUDIO_CAPTURE_STOP|TRANSCRIPT_START|TRANSCRIPT_STOP|TRANSCRIPT_TOGGLE|TRANSCRIPT_SHOW|ANSWER|MODELS|SET_MODEL|SET_LANGUAGE|PROMPT_LIST|PROMPT_SET|STATUS|STATUS_FIELDS|QUIT`,
   or each command's case-sensitive shortcut (E, C, s, sa, sx, V, n, N, send, f, r, R, c, c+, c-, t+, t-, t, T, A,
@@ -52,6 +56,8 @@
 - Show one window by hand: `bin/rvw_view --window transcript|answer [--seconds 300]`; the
   the menu bar does the same thing, and alt-cmd-W for the transcript window
 - Take one screenshot by hand: `bin/screen_capture --output /tmp/shot.png --target frontmost`
+- Take one frame from the capture card by hand: `bin/hdmi_capture --output /tmp/hdmi.png --device "Elgato 4K X"`
+  (`--list-devices` names the attached video devices and needs no permission)
 
 ## Notes
 - The venv is `.venv` at the repo root, python 3.12 arm64; MLX needs arm64 throughout.
@@ -140,8 +146,10 @@
   checks the answering model in every streamed chunk. Do not remove either check: without
   them a screenshot sent to the vision model comes back written by the text model and
   looks like a success.
-- Microphone, system audio and screen recording are granted to `bin/rvw.app`, and
-  Accessibility to Hammerspoon; `util/init_permissions.sh` explains and probes all four.
+- Microphone, system audio, screen recording and (where the HDMI capture card is attached)
+  camera are granted to `bin/rvw.app`, and Accessibility to Hammerspoon;
+  `util/init_permissions.sh` explains and probes all five. When `helper/build_app.sh` does
+  re-sign the bundle it clears the voided records with `tccutil reset All`, so macOS asks afresh.
   Both audio probes read one launcher log, so each probe waits for the launcher to record
   the helper's exit before returning; without that wait the next probe reads the previous
   one's verdict and calls a granted permission missing.

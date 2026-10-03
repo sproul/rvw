@@ -191,6 +191,16 @@ lms_command = Path.home() / ".lmstudio" / "bin" / "lms"
 screenshot_target = os.environ.get("RVW_SCREENSHOT_TARGET", "frontmost")
 screenshot_timeout_seconds = 20.0
 
+# Where a screenshot comes from, a global mode set by `bin/rvw --screenshot-source`:
+# "screen" is this Mac's own screen; "hdmi" is the other Mac's, read from the
+# HDMI capture card named below, which is how the two-Mac arrangement sees the
+# work machine. A command line flag, not an environment variable, because the
+# daemon runs inside bin/rvw.app and never sees a shell's exports.
+screenshot_sources = ("hdmi", "screen")
+screenshot_source = "screen"
+hdmi_capture_helper_path = bin_dir / "hdmi_capture"
+hdmi_capture_device_name = "Elgato 4K X"
+
 # Console OCR: the Vision helper reads an already archived PNG, so it needs no
 # screen recording permission and no extra third-party software.
 ocr_helper_path = bin_dir / "ocr_image"
@@ -206,6 +216,13 @@ def require_known_stream(stream_name):
     """Reject a capture stream name that the rest of the system cannot label."""
     if stream_name not in stream_labels:
         raise ValueError("unknown capture stream %r" % (stream_name,))
+
+
+def require_known_screenshot_source(source):
+    """Reject a screenshot source with no helper behind it."""
+    if source not in screenshot_sources:
+        raise ValueError("unknown screenshot source %r; known: %s"
+                         % (source, ", ".join(screenshot_sources)))
 
 
 def require_known_recognition_language(language):

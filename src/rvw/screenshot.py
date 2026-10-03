@@ -8,8 +8,9 @@ directory that rvw/meeting_archive.py owns,
                                                   /YYYY-MM-DD_HH.MM.SS.mmm.json
 
 so that a saved image sits beside the transcript of the same session and can be
-aligned with its timestamps. Capture itself lives in the Swift helper, which owns
-the screen recording permission.
+aligned with its timestamps. Capture itself lives in the Swift helpers:
+bin/screen_capture for this Mac's screen, bin/hdmi_capture for the other Mac's
+screen arriving through an HDMI capture card.
 """
 
 import base64
@@ -41,15 +42,17 @@ def capture_screenshot(session_started_epoch, now=None, *,
                        target=None, exclude_window_id=None):
     """Save one screenshot and its metadata; raise RuntimeError if nothing was saved.
 
-    `target` overrides config.screenshot_target ("display" captures the whole
-    main display); `exclude_window_id` keeps one on-screen window out of a
-    display capture, which is how the console removes itself from its own shot.
+    The image comes from config.screenshot_source: this Mac's screen, or the
+    other Mac's through the HDMI capture card. For this Mac's screen `target`
+    overrides config.screenshot_target ("display" captures the whole main
+    display) and `exclude_window_id` keeps one on-screen window out of a display
+    capture, which is how the console removes itself from its own shot.
     """
     captured_epoch = time.time() if now is None else now
     image_path = screenshot_image_path(session_started_epoch, captured_epoch)
+    command = _capture_command(image_path, target, exclude_window_id)
     image_path.parent.mkdir(parents=True, exist_ok=True)
-    helper_metadata = _run_capture_helper(image_path, target or config.screenshot_target,
-                                          exclude_window_id)
+    helper_metadata = _run_capture_helper(command)
     _require_image_was_written(image_path)
     metadata = _build_metadata(image_path, captured_epoch, helper_metadata)
     metadata_path = _write_metadata(image_path, metadata)
@@ -75,15 +78,36 @@ def _timestamp_with_milliseconds(epoch):
     return "%s.%03d" % (time.strftime(image_name_format, time.localtime(epoch)), milliseconds)
 
 
-def _run_capture_helper(image_path, target, exclude_window_id):
-    """Run the Swift helper and return the metadata it printed as JSON."""
-    if not Path(config.screen_capture_helper_path).exists():
-        raise RuntimeError("missing screen capture helper %s; run helper/build.sh"
-                           % config.screen_capture_helper_path)
+def _capture_command(image_path, target, exclude_window_id):
+    """The helper command line for the configured screenshot source."""
+    config.require_known_screenshot_source(config.screenshot_source)
+    if config.screenshot_source == "hdmi":
+        return _hdmi_capture_command(image_path, target, exclude_window_id)
+    return _screen_capture_command(image_path, target, exclude_window_id)
+
+
+def _hdmi_capture_command(image_path, target, exclude_window_id):
+    """The capture card shows the other Mac's whole screen, nothing narrower."""
+    if target is not None or exclude_window_id is not None:
+        raise ValueError("an HDMI capture is the other Mac's whole screen; it takes no "
+                         "target (%r) and no window to exclude (%r)"
+                         % (target, exclude_window_id))
+    return [str(config.hdmi_capture_helper_path), "--output", str(image_path),
+            "--device", config.hdmi_capture_device_name]
+
+
+def _screen_capture_command(image_path, target, exclude_window_id):
     command = [str(config.screen_capture_helper_path), "--output", str(image_path),
-               "--target", target]
+               "--target", target or config.screenshot_target]
     if exclude_window_id is not None:
         command += ["--exclude-window-id", str(exclude_window_id)]
+    return command
+
+
+def _run_capture_helper(command):
+    """Run the Swift helper and return the metadata it printed as JSON."""
+    if not Path(command[0]).exists():
+        raise RuntimeError("missing capture helper %s; run helper/build.sh" % command[0])
     finished = subprocess.run(command, capture_output=True,
                               timeout=config.screenshot_timeout_seconds)
     if finished.returncode != 0:
@@ -133,5 +157,6 @@ def _write_metadata(image_path, metadata):
 
 
 def _describe_source(metadata):
-    return "%s: %s" % (metadata.get("application") or "unknown application",
+    return "%s: %s" % (metadata.get("application") or metadata.get("device")
+                       or "unknown application",
                        metadata.get("window_title") or metadata.get("target") or "unknown window")

@@ -14,7 +14,7 @@
 // THIS FILE MUST NOT CHANGE. An ad hoc signature is pinned to the exact bytes
 // of the binary it signs:
 //
-//     # designated => cdhash H"3e6066c51eb7fef93e36317f1165c2a7a7b79077"
+//     # designated => cdhash H"<40 hex digits>"   (codesign -d -r- bin/rvw.app)
 //
 // so rebuilding this launcher gives rvw.app a new identity and macOS forgets
 // every permission ever granted to it. Everything that is expected to change

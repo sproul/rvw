@@ -16,6 +16,7 @@ set -o pipefail
 
 script_dir=$(cd "$(dirname "$BASH_SOURCE")" && pwd)
 repo_dir=$(cd "$script_dir/.." && pwd)
+source "$script_dir/swift_build_settings.sh"
 
 app_bundle=$repo_dir/bin/rvw.app
 contents_dir=$app_bundle/Contents
@@ -24,16 +25,19 @@ build_stamp=$contents_dir/Resources/build_id
 
 launcher_source=$script_dir/rvw_launcher.swift
 property_list=$script_dir/rvw_app.plist
+bundle_id=ai.rvw.assistant
 
 launch_services_register=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
 log_ok() { echo "OK   $*"; }
 die()    { echo "FAIL $*" >&2; exit 1; }
 
-# What the bundle was built from. While this is unchanged there is nothing to
-# gain from rebuilding and a permission grant to lose.
+# What the bundle was built from, the target architecture included. While this
+# is unchanged there is nothing to gain from rebuilding and a permission grant to
+# lose.
 current_build_id() {
-    cat "$launcher_source" "$property_list" | shasum -a 256 | cut -d' ' -f1
+    { cat "$launcher_source" "$property_list"; echo "$swift_target"; } |
+        shasum -a 256 | cut -d' ' -f1
 }
 
 bundle_is_built_from_the_current_sources() {
@@ -45,7 +49,8 @@ assemble_bundle() {
     rm -rf "$app_bundle"
     mkdir -p "$contents_dir/MacOS" "$contents_dir/Resources" || die "cannot create $contents_dir"
     cp "$property_list" "$contents_dir/Info.plist" || die "cannot install the property list"
-    swiftc -O -parse-as-library -o "$launcher_binary" "$launcher_source" ||
+    swiftc -O -parse-as-library -target "$swift_target" -o "$launcher_binary" \
+        "$launcher_source" ||
         die "compiling the launcher failed"
     current_build_id > "$build_stamp" || die "cannot record what the bundle was built from"
 }
@@ -74,6 +79,15 @@ require_that_the_bundle_can_hold_a_microphone_grant() {
     return 0
 }
 
+# The grants of the earlier build no longer match this signature, but macOS
+# keeps their records, and a stale record shows the switch in System Settings
+# as on while granting nothing. Clearing them makes macOS ask afresh.
+forget_the_voided_grants() {
+    tccutil reset All "$bundle_id" >/dev/null ||
+        die "cannot clear the permission records of $bundle_id; run tccutil reset All $bundle_id"
+    log_ok "cleared the voided permission records of $bundle_id"
+}
+
 report_what_the_rebuild_cost() {
     log_ok "any macOS permission granted to an earlier build of rvw.app is now void"
     log_ok "run util/init_permissions.sh once to grant them to this build"
@@ -89,6 +103,7 @@ assemble_bundle
 sign_bundle
 register_bundle_with_launch_services
 require_that_the_bundle_can_hold_a_microphone_grant
+forget_the_voided_grants
 report_what_the_rebuild_cost
 
 exit

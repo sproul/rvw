@@ -26,6 +26,8 @@
     <key>LSMinimumSystemVersion</key>
     <string>14.4</string>
     <!-- macOS shows these when it asks, and refuses to ask without them. -->
+    <key>NSCameraUsageDescription</key>
+    <string>The listening assistant reads the other Mac's screen from an HDMI capture card, which macOS treats as a camera, and saves it locally like a screenshot.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>The listening assistant transcribes the microphone locally so it can explain what was just said.</string>
     <key>NSAudioCaptureUsageDescription</key>

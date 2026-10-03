@@ -1,5 +1,6 @@
 #!/bin/bash
-# Build the capture helpers, bin/audio_capture and bin/screen_capture, and the
+# Build the capture helpers, bin/audio_capture, bin/screen_capture and
+# bin/hdmi_capture, and the
 # application bundle that owns their permissions, bin/rvw.app.
 #
 # The usage descriptions must be inside the binary itself: macOS refuses to let a
@@ -16,6 +17,7 @@ set -o pipefail
 
 script_dir=$(cd "$(dirname "$BASH_SOURCE")" && pwd)
 repo_dir=$(cd "$script_dir/.." && pwd)
+source "$script_dir/swift_build_settings.sh"
 
 log_ok()   { echo "OK   $*"; }
 die()      { echo "FAIL $*" >&2; exit 1; }
@@ -28,8 +30,8 @@ build_helper() {
     local framework
     for framework in "$@"; do frameworks+=(-framework "$framework"); done
 
-    swiftc -O -parse-as-library -o "$output_binary" "$script_dir/$name.swift" \
-        "${frameworks[@]}" \
+    swiftc -O -parse-as-library -target "$swift_target" -o "$output_binary" \
+        "$script_dir/$name.swift" "${frameworks[@]}" \
         -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist \
         -Xlinker "$script_dir/$name.plist" || die "compiling $name failed"
     log_ok "compiled $output_binary"
@@ -44,8 +46,8 @@ build_helper() {
 build_viewer() {
     local output_binary=$repo_dir/bin/rvw_view
 
-    swiftc -O -parse-as-library -o "$output_binary" "$script_dir/rvw_view.swift" \
-        -framework AppKit || die "compiling rvw_view failed"
+    swiftc -O -parse-as-library -target "$swift_target" -o "$output_binary" \
+        "$script_dir/rvw_view.swift" -framework AppKit || die "compiling rvw_view failed"
     log_ok "compiled $output_binary"
 
     codesign --force --sign - --identifier "ai.rvw.rvw_view" "$output_binary" ||
@@ -57,6 +59,7 @@ mkdir -p "$repo_dir/bin" || die "cannot create $repo_dir/bin"
 
 build_helper audio_capture AVFoundation CoreAudio
 build_helper screen_capture AppKit ScreenCaptureKit ImageIO
+build_helper hdmi_capture AVFoundation CoreImage ImageIO
 build_viewer
 build_helper ocr_image Vision
 
@@ -67,3 +70,5 @@ $dp/git/rvw/helper/build.sh
 $dp/git/rvw/bin/audio_capture --source mic > /tmp/mic.f32
 $dp/git/rvw/bin/audio_capture --source system > /tmp/system.f32
 $dp/git/rvw/bin/screen_capture --output /tmp/shot.png --target frontmost
+$dp/git/rvw/bin/hdmi_capture --list-devices
+$dp/git/rvw/bin/hdmi_capture --output /tmp/hdmi.png --device "Elgato 4K X"

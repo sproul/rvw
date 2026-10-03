@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>ai.rvw.hdmi_capture</string>
+    <key>CFBundleName</key>
+    <string>rvw hdmi capture</string>
+    <key>NSCameraUsageDescription</key>
+    <string>The listening assistant reads the other Mac's screen from an HDMI capture card, which macOS treats as a camera, and saves it locally like a screenshot.</string>
+</dict>
+</plist>

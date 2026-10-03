@@ -18,6 +18,10 @@
 #                     playback and headphones are unaffected.
 #   Screen Recording  bin/screen_capture archives the frontmost window with
 #                     ScreenCaptureKit for alt-cmd-S and ctrl-alt-cmd-S.
+#   Camera            bin/hdmi_capture reads the other Mac's screen from an HDMI
+#                     capture card, which macOS counts as a camera. Probed only
+#                     on a Mac with that card attached, because nowhere else
+#                     does the assistant have any use for a camera.
 #   Accessibility     Hammerspoon owns the global hotkeys, so it needs this and
 #                     the assistant itself does not.
 #
@@ -28,7 +32,7 @@
 # where it would be worth nothing the next time the assistant is started from
 # somewhere else.
 #
-# Answering these three prompts once is the whole of it. rvw.app is the only
+# Answering these prompts once is the whole of it. rvw.app is the only
 # identity the assistant ever presents, so it no longer matters whether the
 # daemon is started from a terminal, from Emacs or from a hotkey, and no other
 # application ever needs a grant. That also settles a permission Emacs.app
@@ -53,6 +57,10 @@ repo_dir=$(cd "$script_dir/.." && pwd)
 # bin directory, and naming them twice would be one name too many.
 audio_helper=audio_capture
 screen_helper=screen_capture
+hdmi_helper=hdmi_capture
+# Listing the video devices needs no permission, so this one is run directly.
+hdmi_helper_path=$repo_dir/bin/$hdmi_helper
+venv_python=$repo_dir/.venv/bin/python
 app_bundle=$repo_dir/bin/rvw.app
 app_bundle_id=ai.rvw.assistant
 log_dir=$repo_dir/var/log
@@ -73,6 +81,7 @@ reset_mode=0                            # set by -reset; clears the decisions so
 failed_permissions=()
 
 log_ok()   { echo "OK   $*"; }
+log_info() { echo "INFO $*"; }
 log_fail() { echo "FAIL $*" >&2; }
 die()      { log_fail "$*"; exit 1; }
 
@@ -140,7 +149,8 @@ wait_until_the_launcher_reported_the_exit() {
 }
 
 require_the_helpers_and_the_bundle_are_built() {
-    [[ -x $repo_dir/bin/$audio_helper && -x $repo_dir/bin/$screen_helper && -d $app_bundle ]] &&
+    [[ -x $repo_dir/bin/$audio_helper && -x $repo_dir/bin/$screen_helper &&
+       -x $hdmi_helper_path && -d $app_bundle ]] &&
         return 0
     log_ok "building the capture helpers and rvw.app first"
     "$repo_dir/helper/build.sh" >/dev/null || die "helper/build.sh failed; build it by hand and rerun"
@@ -188,6 +198,7 @@ settings_url_for_service() {
     case "$1" in
         Accessibility) echo "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" ;;
         AudioCapture)  echo "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture" ;;
+        Camera)        echo "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera" ;;
         Microphone)    echo "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone" ;;
         ScreenCapture) echo "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture" ;;
         *)             echo "x-apple.systempreferences:com.apple.preference.security?Privacy" ;;
@@ -236,6 +247,35 @@ explain_how_screen_recording_is_granted() {
     log_fail "  Privacy and Security, Screen Recording, then run this script again"
 }
 
+# The one name src/rvw/config.py gives the card, so this cannot disagree with
+# what the assistant will try to open.
+hdmi_capture_device_name() {
+    PYTHONPATH=$repo_dir/src "$venv_python" -c \
+        'from rvw import config; print(config.hdmi_capture_device_name)' ||
+        die "cannot read hdmi_capture_device_name from src/rvw/config.py"
+}
+
+hdmi_capture_device_is_attached() {
+    local device_name
+    device_name=$(hdmi_capture_device_name) || return 1
+    "$hdmi_helper_path" --list-devices | LC_ALL=C grep -Fxq -- "$device_name"
+}
+
+# --check-permission asks for the camera and nothing else, so the probe needs no
+# signal on the card, only the card.
+check_camera_permission() {
+    if ! hdmi_capture_device_is_attached; then
+        log_info "no $(hdmi_capture_device_name) attached; the camera permission only serves HDMI capture, so it is not asked for"
+        return 0
+    fi
+    local diagnostic succeeded=0 success_phrase="camera access is authorized"
+    log_ok "probing Camera for the HDMI capture card; answer the macOS prompt if one appears"
+    diagnostic=$(run_helper_through_the_app "$hdmi_helper" "$success_phrase" --check-permission)
+    [[ $diagnostic == *"$success_phrase"* ]] && succeeded=1
+    record_result "Camera (HDMI capture card)" Camera "$succeeded" \
+        "$(last_diagnostic_line "$diagnostic")"
+}
+
 # Hammerspoon holds this one, and it can answer for itself.
 check_hammerspoon_accessibility() {
     if ! command -v hs >/dev/null 2>&1; then
@@ -252,7 +292,7 @@ check_hammerspoon_accessibility() {
 
 reset_permissions() {
     local service
-    for service in AudioCapture Microphone ScreenCapture; do
+    for service in AudioCapture Camera Microphone ScreenCapture; do
         if tccutil reset "$service" "$app_bundle_id" >/dev/null 2>&1; then
             log_ok "reset $service for $app_bundle_id"
         else
@@ -283,6 +323,7 @@ main() {
     check_microphone_permission
     check_system_audio_permission
     check_screen_recording_permission
+    check_camera_permission
     check_hammerspoon_accessibility
     print_summary
 }

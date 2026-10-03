@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from rvw import config, prompts
-from rvw.assistant import Assistant, text_llm_for
+from rvw.assistant import Assistant, parse_arguments, set_global_modes_from, text_llm_for
 from rvw.claude_code_llm import ClaudeCodeLlm
 from rvw.llm import LocalLlm, LocalLlmError
 from rvw.transcript import TranscriptSegment
@@ -221,6 +221,35 @@ class RegisteredCommandsTest(AssistantCommandTestCase):
         self.assertTrue(self.dispatch("explain_speech").startswith("FAIL "))
 
 
+class ScreenshotSourceArgumentTest(unittest.TestCase):
+    """`--screenshot-source hdmi` reads the screen of the other Mac from the
+    capture card. It is a command line flag rather than an environment variable
+    because the daemon runs inside bin/rvw.app and never sees a shell's exports."""
+
+    def setUp(self):
+        saved = (config.screenshot_source, config.debug_mode)
+        self.addCleanup(self.restore, saved)
+
+    @staticmethod
+    def restore(saved):
+        config.screenshot_source, config.debug_mode = saved
+
+    def test_the_screen_of_this_mac_is_the_default(self):
+        self.assertEqual("screen", parse_arguments([]).screenshot_source)
+
+    def test_the_capture_card_can_be_chosen(self):
+        self.assertEqual("hdmi", parse_arguments(["--screenshot-source", "hdmi"]).screenshot_source)
+
+    def test_an_unknown_source_is_refused(self):
+        with self.assertRaises(SystemExit):
+            parse_arguments(["--screenshot-source", "camera"])
+
+    def test_the_choice_becomes_the_global_mode(self):
+        set_global_modes_from(parse_arguments(["--screenshot-source", "hdmi", "--debug"]))
+        self.assertEqual("hdmi", config.screenshot_source)
+        self.assertTrue(config.debug_mode)
+
+
 class StatusFieldsTest(AssistantCommandTestCase):
     """The menu bar polls the session state several times a minute and cannot read
     prose: STATUS is written for a person and would break the menu the moment its
@@ -259,6 +288,9 @@ class StatusFieldsTest(AssistantCommandTestCase):
         space in it would silently turn one field into two for the reader."""
         self.llm.model = "two words"
         self.assertTrue(self.dispatch("STATUS_FIELDS").startswith("FAIL "))
+
+    def test_the_screenshot_source_is_reported(self):
+        self.assertEqual(config.screenshot_source, self.fields()["screenshot_source"])
 
     def test_the_prose_status_still_describes_the_same_session(self):
         self.dispatch("TRANSCRIPT_START")

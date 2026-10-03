@@ -452,6 +452,18 @@ class RequestingWindowTest(ConsoleTestCase):
         self.assertIsNone(target)
         self.assertIsNone(excluded)
 
+    def test_a_typed_command_hides_nothing_when_the_screen_is_the_other_macs(self):
+        """The capture card shows the work machine; this machine's windows are
+        not in the picture, so minimizing one would only get in the way."""
+        saved_source = config.screenshot_source
+        self.addCleanup(setattr, config, "screenshot_source", saved_source)
+        config.screenshot_source = "hdmi"
+        self.assertTrue(self.console.handle_line("sa").startswith("OK "))
+        self.assertEqual([], self.hs_calls)
+        _, target, excluded = self.captures[0]
+        self.assertIsNone(target)
+        self.assertIsNone(excluded)
+
     def test_a_window_id_that_is_not_numeric_never_reaches_capture(self):
         def gibberish(script):
             self.events.append(("hs", script))

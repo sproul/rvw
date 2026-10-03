@@ -133,6 +133,7 @@ The choices that shape all of it:
 | `src/rvw/config.py` | every tuning knob, path and model choice |
 | `helper/audio_capture.swift` | Core Audio / AVAudioEngine capture, built into `bin/audio_capture` |
 | `helper/screen_capture.swift` | ScreenCaptureKit capture, built into `bin/screen_capture` |
+| `helper/hdmi_capture.swift` | one frame from an HDMI capture card, built into `bin/hdmi_capture` |
 | `helper/rvw_launcher.swift` | the launcher inside `bin/rvw.app`; deliberately frozen |
 | `helper/build.sh`, `helper/build_app.sh` | build the helpers and the bundle |
 | `bin/rvw`, `bin/rvwctl` | daemon launcher, and the stdlib-only hotkey client |
@@ -177,6 +178,7 @@ The permissions, and who they are granted to:
 | Microphone | `audio_capture --source mic` | `bin/rvw.app` |
 | Audio Recording | `audio_capture --source system`, the Core Audio tap | `bin/rvw.app` |
 | Screen Recording | `screen_capture` | `bin/rvw.app` |
+| Camera | `hdmi_capture`, only where the HDMI capture card is attached | `bin/rvw.app` |
 | Accessibility | the global hotkeys | Hammerspoon |
 
 There is no API that grants a permission, and none that reads one: the only way to
@@ -189,8 +191,9 @@ does with the real helpers.
 helper/build.sh
 ```
 
-This builds `bin/audio_capture`, `bin/screen_capture` and `bin/rvw.app`. Rebuilding
-the two capture helpers costs nothing. Rebuilding the bundle voids every permission
+This builds `bin/audio_capture`, `bin/screen_capture`, `bin/hdmi_capture` and
+`bin/rvw.app`, all for arm64 whatever architecture the building shell runs under.
+Rebuilding the capture helpers costs nothing. Rebuilding the bundle voids every permission
 granted to it, because its ad hoc signature is pinned to the launcher's bytes, so
 `build_app.sh` rebuilds only when its own sources actually changed - and
 `helper/rvw_launcher.swift` is meant to stay frozen.
@@ -218,7 +221,14 @@ bin/screen_capture --output /tmp/shot.png --target frontmost
 bin/rvw                          # start the daemon inside bin/rvw.app
 bin/rvw --source system --listen # start it already capturing, playback only
 bin/rvw -here --debug            # run in this terminal, for debugging
+bin/rvw --screenshot-source hdmi # screenshots are the other Mac's screen, from the capture card
 ```
+
+With `--screenshot-source hdmi` every screen command (`s`, `sa`, `sx`, `V`) reads one
+frame of the other Mac's HDMI output from the capture card named by
+`config.hdmi_capture_device_name` (the Elgato 4K X) instead of photographing this
+screen; the archive, OCR and prompts are unchanged. A uniform frame, which is what the
+card delivers without a signal, is refused rather than archived.
 
 The assistant prints a banner listing the hotkeys, says where screenshots are going
 and whether the transcript is being kept, and reports whether the LLM and the optional

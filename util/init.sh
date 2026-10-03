@@ -6,7 +6,8 @@ set -o pipefail
 
 init_local_models.sh -x -y
 init_llm_autostart.sh                   # the LM Studio server does not survive a reboot on its own
-init_permissions.sh -open               # prompts for microphone, system audio, screen recording
+$script_dir/../helper/build.sh || exit 1  # the helpers, and rvw.app only when its sources changed
+init_permissions.sh -open               # prompts for microphone, system audio, screen recording, camera
 
 exit
 $dp/git/rvw/util/init.sh

@@ -147,6 +147,77 @@ echo '{"target":"display","application":"Terminal","window_title":"rvw","display
         self.assertNotIn("--exclude-window-id", arguments)
 
 
+hdmi_helper_template = """#!/bin/sh
+printf '%%s\\n' "$@" > "%(args_path)s"
+output=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --output) output=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf 'pretend png bytes' > "$output"
+echo '{"target":"hdmi","device":"Elgato 4K X","width":3840,"height":2160}'
+"""
+
+
+class HdmiCaptureTest(ScreenshotTestCase):
+    """With the HDMI source the image is the other Mac's screen, read from the
+    capture card by bin/hdmi_capture; the archive is exactly the same."""
+
+    def setUp(self):
+        super().setUp()
+        self.saved_source = config.screenshot_source
+        self.saved_hdmi_helper_path = config.hdmi_capture_helper_path
+        self.addCleanup(self.restore_hdmi_configuration)
+        config.screenshot_source = "hdmi"
+        self.args_path = self.root / "hdmi_args.txt"
+        config.hdmi_capture_helper_path = self.root / "hdmi_capture"
+        config.hdmi_capture_helper_path.write_text(
+            hdmi_helper_template % {"args_path": self.args_path}, encoding="utf-8")
+        config.hdmi_capture_helper_path.chmod(0o755)
+        self.use_helper(failing_helper)          # the screen helper must not be used
+
+    def restore_hdmi_configuration(self):
+        config.screenshot_source = self.saved_source
+        config.hdmi_capture_helper_path = self.saved_hdmi_helper_path
+
+    def test_the_capture_card_helper_is_asked_for_the_configured_device(self):
+        self.capture()
+        arguments = self.args_path.read_text().splitlines()
+        self.assertEqual(["--output", "--device", config.hdmi_capture_device_name],
+                         [a for a in arguments if not a.endswith(".png")])
+
+    def test_the_frame_is_archived_with_the_device_in_its_metadata(self):
+        result = self.capture()
+        recorded = json.loads(result.metadata_path.read_text(encoding="utf-8"))
+        self.assertEqual("hdmi", recorded["target"])
+        self.assertEqual("Elgato 4K X", recorded["device"])
+        self.assertEqual(result.image_path.name, recorded["image"])
+
+    def test_a_screen_target_makes_no_sense_for_the_capture_card(self):
+        with self.assertRaises(ValueError):
+            screenshot.capture_screenshot(SESSION_EPOCH, now=CAPTURE_EPOCH,
+                                          target="display", exclude_window_id=4242)
+
+    def test_a_missing_capture_card_helper_says_how_to_build_it(self):
+        config.hdmi_capture_helper_path = self.root / "not_built"
+        with self.assertRaises(RuntimeError) as raised:
+            self.capture()
+        self.assertIn("build.sh", str(raised.exception))
+
+
+class ScreenshotSourceTest(unittest.TestCase):
+
+    def test_an_unknown_source_is_refused(self):
+        with self.assertRaises(ValueError):
+            config.require_known_screenshot_source("hdmi2")
+
+    def test_both_sources_are_known(self):
+        for source in ["hdmi", "screen"]:
+            config.require_known_screenshot_source(source)
+
+
 class FailingCaptureTest(ScreenshotTestCase):
 
     def test_a_failing_helper_is_reported_with_its_own_diagnostic(self):

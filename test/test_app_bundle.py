@@ -10,7 +10,7 @@ application: granted once, permanent from then on.
 That permanence is the whole point and it is fragile, because an ad hoc
 signature is pinned to the exact bytes of the binary:
 
-    # designated => cdhash H"3e6066c51eb7fef93e36317f1165c2a7a7b79077"
+    # designated => cdhash H"<40 hex digits>"   (codesign -d -r- bin/rvw.app)
 
 Rebuild the launcher and the cdhash changes, the stored grant no longer matches
 and macOS asks again. The bundle therefore holds nothing but a frozen launcher,
@@ -30,9 +30,13 @@ app_bundle = repo_dir / "bin" / "rvw.app"
 launcher_path = app_bundle / "Contents" / "MacOS" / "rvw_launcher"
 information_property_list = app_bundle / "Contents" / "Info.plist"
 
-required_usage_descriptions = ["NSMicrophoneUsageDescription",
+# The camera is the HDMI capture card: macOS treats any video input as a camera.
+required_usage_descriptions = ["NSCameraUsageDescription",
+                               "NSMicrophoneUsageDescription",
                                "NSAudioCaptureUsageDescription",
                                "NSScreenCaptureUsageDescription"]
+
+built_helpers = ["audio_capture", "hdmi_capture", "ocr_image", "rvw_view", "screen_capture"]
 
 
 def build_the_bundle():
@@ -89,6 +93,21 @@ class AppBundleBuildTest(unittest.TestCase):
         for key in required_usage_descriptions:
             self.assertIn(key, declared)
             self.assertTrue(declared[key].strip(), "%s is empty" % key)
+
+    def test_the_launcher_runs_natively_on_apple_silicon(self):
+        """Built from a shell running under Rosetta, swiftc defaults to x86_64,
+        and macOS warns that such an application will stop running."""
+        completed = subprocess.run(["lipo", "-archs", str(launcher_path)],
+                                   capture_output=True, text=True)
+        self.assertEqual("arm64", completed.stdout.strip(), completed.stderr)
+
+    def test_every_helper_runs_natively_on_apple_silicon(self):
+        """helper/build.sh builds these; this only reads what it built."""
+        for helper in built_helpers:
+            with self.subTest(helper=helper):
+                completed = subprocess.run(["lipo", "-archs", str(repo_dir / "bin" / helper)],
+                                           capture_output=True, text=True)
+                self.assertEqual("arm64", completed.stdout.strip(), completed.stderr)
 
     def test_the_signature_verifies(self):
         completed = subprocess.run(["codesign", "--verify", "--strict", str(app_bundle)],

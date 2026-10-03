@@ -163,5 +163,51 @@ class StaleVerdictTest(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 5.0)
 
 
+class CameraProbeTest(unittest.TestCase):
+    """The camera permission is only for reading the HDMI capture card, so it is
+    probed only on a Mac with that card attached; elsewhere asking for the camera
+    would be a prompt with no purpose. The device list comes from the helper."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.helper = Path(self.directory.name) / "hdmi_capture"
+
+    def run_with_devices(self, device_lines, body):
+        self.helper.write_text("#!/bin/sh\n[ \"$1\" = --list-devices ] || exit 9\n"
+                               "printf '%s'\n" % device_lines)
+        self.helper.chmod(0o755)
+        return run_bash_using_the_script("""
+            hdmi_helper_path=%s
+            hdmi_capture_device_name() { echo 'Elgato 4K X'; }
+            run_helper_through_the_app() { echo "PROBED $*" >&2; echo "OK   camera access is authorized"; }
+            %s
+        """ % (self.helper, body))
+
+    def test_an_attached_card_is_recognised_by_its_exact_name(self):
+        completed = self.run_with_devices("USB 2.0 Camera\\nElgato 4K X\\n",
+                                          "hdmi_capture_device_is_attached && echo yes")
+        self.assertEqual("yes", completed.stdout.strip(), completed.stderr)
+
+    def test_a_similar_name_is_not_the_card(self):
+        completed = self.run_with_devices("Elgato 4K X Pro\\n",
+                                          "hdmi_capture_device_is_attached || echo no")
+        self.assertEqual("no", completed.stdout.strip(), completed.stderr)
+
+    def test_without_the_card_the_camera_is_not_probed(self):
+        completed = self.run_with_devices("USB 2.0 Camera\\n", "check_camera_permission")
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertNotIn("PROBED", completed.stderr)
+        self.assertIn("INFO", completed.stdout)
+        self.assertNotIn("FAIL", completed.stdout + completed.stderr)
+
+    def test_with_the_card_the_camera_is_probed_through_the_app(self):
+        completed = self.run_with_devices("Elgato 4K X\\n", "check_camera_permission")
+        probed = completed.stderr.strip()
+        self.assertTrue(probed.startswith("PROBED hdmi_capture "), probed)
+        self.assertTrue(probed.endswith(" --check-permission"), probed)
+        self.assertIn("Camera (HDMI capture card) permission is granted", completed.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
